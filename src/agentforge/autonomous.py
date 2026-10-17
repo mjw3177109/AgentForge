@@ -15,11 +15,15 @@ from agentforge.contracts import ArchitectureDraft, RequirementDraft, TaskBundle
 from agentforge.evidence import EvidenceIndex
 from agentforge.live import LivePlanningPipeline
 from agentforge.llm import OpenAICompatibleClient
+from agentforge.policy import PolicyEngine
 
 
 class AgentExecutionProfile(BaseModel):
     context_paths: list[str] = Field(default_factory=list)
     verification: list[VerificationSpec] = Field(default_factory=list)
+    read_scope: list[str] = Field(default_factory=list)
+    write_scope: list[str] = Field(default_factory=list)
+    deny_scope: list[str] = Field(default_factory=list)
 
 
 class ReviewDecision(BaseModel):
@@ -228,6 +232,47 @@ class AutonomousDevelopmentPipeline:
         self.allowed_verification_executables = set(allowed_verification_executables)
         self.max_coding_attempts = max_coding_attempts
 
+    def _project_context(self) -> str:
+        path = self.repo_root / ".agent/project.yaml"
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")[:20000]
+
+    def _task_constraints(self) -> str:
+        payload: dict[str, dict[str, list[str]]] = {}
+        for name, profile in sorted(self.profiles.items()):
+            payload[name] = {
+                "read_scope": profile.read_scope,
+                "write_scope": profile.write_scope,
+                "deny_scope": profile.deny_scope,
+            }
+        return (
+            "assigned_agent MUST be one of the exact profile names below. "
+            "Prefer exactly one task per needed execution agent so each task can pass that agent's complete verification gate. "
+            "If a profile declares read_scope/write_scope/deny_scope, task scope entries MUST be chosen only from those exact lists; "
+            "do not invent broader globs or semantic scope labels.\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+        )
+
+    @staticmethod
+    def _validate_task_profile_scope(task: TaskDraft, profile: AgentExecutionProfile) -> None:
+        for field_name, task_values, allowed_values in (
+            ("read", task.scope.read, profile.read_scope),
+            ("write", task.scope.write, profile.write_scope),
+            ("deny", task.scope.deny, profile.deny_scope),
+        ):
+            if allowed_values and not set(task_values).issubset(set(allowed_values)):
+                extras = sorted(set(task_values) - set(allowed_values))
+                raise ValueError(
+                    f"{task.id} expanded {field_name} scope beyond execution profile: {extras}"
+                )
+        if profile.write_scope and not task.scope.write:
+            raise ValueError(f"{task.id} has no write scope although its execution profile is writable")
+        if profile.read_scope:
+            policy = PolicyEngine(read=task.scope.read, write=task.scope.write, deny=task.scope.deny)
+            for context_path in profile.context_paths:
+                policy.require_read(context_path)
+
     def run(
         self,
         request: str,
@@ -249,11 +294,18 @@ class AutonomousDevelopmentPipeline:
         git = GitWorkspace(self.repo_root)
         git.ensure_clean()
 
-        plan = LivePlanningPipeline(self.client).plan(request, requirement_id, adr_id)
+        plan = LivePlanningPipeline(self.client).plan(
+            request,
+            requirement_id,
+            adr_id,
+            project_context=self._project_context(),
+            task_constraints=self._task_constraints(),
+        )
         ordered_tasks = topological_tasks(plan.tasks)
         for task in ordered_tasks:
             if task.assigned_agent not in self.profiles:
                 raise ValueError(f"No execution profile for agent {task.assigned_agent}")
+            self._validate_task_profile_scope(task, self.profiles[task.assigned_agent])
 
         branch = feature_branch or f"feature/{plan.requirement.id}"
         git.create_feature_branch(branch, base_branch)
