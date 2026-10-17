@@ -10,7 +10,7 @@ import pytest
 
 from agentforge.coding import LiveCodingRuntime, VerificationRunner, VerificationSpec
 from agentforge.contracts import TaskDraft, TaskScope
-from agentforge.errors import EvidenceError, PolicyDenied
+from agentforge.errors import PolicyDenied
 from agentforge.llm import OpenAICompatibleClient
 
 
@@ -133,9 +133,12 @@ def test_missing_evidence_never_writes(tmp_path):
     }
     server, _ = start_server([response])
     try:
-        runtime = LiveCodingRuntime(client_for(server), repo, {Path(sys.executable).name})
-        with pytest.raises(EvidenceError):
-            runtime.execute(task, [], [])
+        runtime = LiveCodingRuntime(
+            client_for(server), repo, {Path(sys.executable).name}, max_attempts=1
+        )
+        result = runtime.execute(task, [], [])
+        assert result.status == "FAILED"
+        assert "EvidenceError" in result.message
         assert not (repo / "app/x.py").exists()
     finally:
         server.shutdown()
@@ -150,9 +153,12 @@ def test_path_traversal_never_writes(tmp_path):
     }
     server, _ = start_server([response])
     try:
-        runtime = LiveCodingRuntime(client_for(server), repo, {Path(sys.executable).name})
-        with pytest.raises(PolicyDenied):
-            runtime.execute(task, [], [])
+        runtime = LiveCodingRuntime(
+            client_for(server), repo, {Path(sys.executable).name}, max_attempts=1
+        )
+        result = runtime.execute(task, [], [])
+        assert result.status == "FAILED"
+        assert "PolicyDenied" in result.message
         assert not (tmp_path / "escape.py").exists()
     finally:
         server.shutdown()
