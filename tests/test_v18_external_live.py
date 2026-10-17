@@ -219,6 +219,36 @@ def test_execution_profile_blocks_planner_scope_expansion():
         AutonomousDevelopmentPipeline._validate_task_profile_scope(task, profile)
 
 
+def test_execution_profile_allows_concrete_paths_inside_glob_and_inherits_denies():
+    profile = AgentExecutionProfile(
+        context_paths=["database/README.md", ".agent/project.yaml"],
+        read_scope=["database/**", ".agent/**"],
+        write_scope=["database/**"],
+        deny_scope=["server/**", "miniapp/**"],
+    )
+    task = TaskDraft(
+        id="TASK-980100",
+        requirement_ids=["REQ-980100"],
+        adr_ids=["ADR-980100"],
+        assigned_agent="database",
+        dependencies=[],
+        scope=TaskScope(
+            read=["database/README.md"],
+            write=["database/migrations/V980100__points.sql"],
+            deny=[],
+        ),
+        acceptance=["migration verified"],
+        verification=[],
+    )
+
+    AutonomousDevelopmentPipeline._validate_task_profile_scope(task, profile)
+
+    assert "database/migrations/V980100__points.sql" in task.scope.write
+    assert ".agent/project.yaml" in task.scope.read
+    assert "server/**" in task.scope.deny
+    assert "miniapp/**" in task.scope.deny
+
+
 def test_coding_runtime_retries_bad_evidence_before_write(tmp_path: Path):
     evidence_path = tmp_path / ".agent/tasks/TASK-980101.yaml"
     evidence_path.parent.mkdir(parents=True)
