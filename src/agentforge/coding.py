@@ -187,12 +187,13 @@ class LiveCodingRuntime:
         task: TaskDraft,
         context_paths: list[str],
         verification: list[VerificationSpec],
+        initial_feedback: str = "",
     ) -> CodingResult:
         policy = self._policy(task)
         builder = TaskContextBuilder(self.repo_root, policy)
         active_paths = list(context_paths)
         actions: list[AgentAction] = []
-        failure_feedback = ""
+        failure_feedback = initial_feedback
         latest_results: list[VerificationResult] = []
 
         for attempt in range(1, self.max_attempts + 1):
@@ -204,7 +205,11 @@ class LiveCodingRuntime:
                 + json_list(evidence_ids)
             )
             if failure_feedback:
-                context += "\n\nPREVIOUS ATTEMPT REJECTED OR VERIFICATION FAILED. Repair only the assigned task.\n" + failure_feedback
+                context += (
+                    "\n\nREPAIR FEEDBACK FROM ORCHESTRATOR, REVIEWER, OR VERIFICATION. "
+                    "Repair only the assigned task and stay inside its scope.\n"
+                    + failure_feedback
+                )
             action = self.client.complete_model(
                 system=(
                     "You are a constrained coding agent. Return only JSON matching AgentAction. "
