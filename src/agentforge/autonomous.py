@@ -250,6 +250,43 @@ class AutonomousDevelopmentPipeline:
             return ""
         return path.read_text(encoding="utf-8", errors="replace")[:20000]
 
+    def _review_context(self, max_chars: int = 40000) -> str:
+        """Build a read-only reviewer bundle from declared verified repository context."""
+        candidates: list[str] = [".agent/project.yaml"]
+        contracts_dir = self.repo_root / ".agent/contracts"
+        if contracts_dir.is_dir():
+            for path in sorted(contracts_dir.rglob("*")):
+                if path.is_file() and not path.is_symlink():
+                    candidates.append(path.relative_to(self.repo_root).as_posix())
+        for profile in self.profiles.values():
+            candidates.extend(profile.context_paths)
+
+        chunks: list[str] = []
+        seen: set[str] = set()
+        used = 0
+        for raw in candidates:
+            rel = str(raw).replace("\\", "/").strip()
+            if not rel or rel in seen or any(char in rel for char in "*?["):
+                continue
+            seen.add(rel)
+            path = (self.repo_root / rel).resolve()
+            try:
+                path.relative_to(self.repo_root)
+            except ValueError:
+                continue
+            if not path.is_file() or path.is_symlink():
+                continue
+            body = path.read_text(encoding="utf-8", errors="replace")
+            block = f"--- {rel} ---\n{body}\n"
+            remaining = max_chars - used
+            if remaining <= 0:
+                break
+            if len(block) > remaining:
+                block = block[:remaining]
+            chunks.append(block)
+            used += len(block)
+        return "\n".join(chunks)
+
     def _task_constraints(self) -> str:
         payload: dict[str, dict[str, list[str]]] = {}
         for name, profile in sorted(self.profiles.items()):
@@ -357,14 +394,19 @@ class AutonomousDevelopmentPipeline:
             f"TASKS:\n{plan.tasks.model_dump_json()}\n\n"
             f"TASK RUNS (orchestrator-recorded verification status):\n"
             f"{json.dumps([record.model_dump() for record in task_runs], ensure_ascii=False, indent=2)}\n\n"
-            f"VERIFIED PROJECT CONTEXT:\n{self._project_context()}\n\n"
+            f"VERIFIED REVIEW CONTEXT (project facts, contracts, and declared agent context):\n{self._review_context()}\n\n"
             "AVAILABLE EVIDENCE IDS:\n"
             f"{json.dumps(evidence_ids, ensure_ascii=False)}\n\n"
             "Put all criticism and requested changes in summary. evidence must contain ONLY exact IDs from AVAILABLE EVIDENCE IDS. "
             "For REQUEST_CHANGES, include every affected TASK id in evidence so the orchestrator can route repairs. "
             "Evaluate all currently identifiable material defects across all tasks in this review; do not intentionally defer known defects to later review cycles. "
             "Requested changes must stay within the requirement, ADR, VERIFIED contracts, and VERIFIED project context; do not invent endpoints, identity sources, or integration facts. "
-            "Do not use file paths or prose in evidence. Existing unchanged files may not appear in DIFF; do not claim they are absent solely because they are not in DIFF.\n\n"
+            "REQUEST_CHANGES has a strict burden of proof: every requested change must be directly supported by REQUIREMENT, ARCHITECTURE, VERIFIED REVIEW CONTEXT, TASK RUNS, or DIFF. "
+            "Do not use hypothetical or conditional concerns (for example may, might, could, if, perhaps, possibly) as rejection reasons. "
+            "Do not require an 'existing' integration, auth client, privileged scope, event handler, endpoint, or other project component unless it is explicitly present in VERIFIED REVIEW CONTEXT or DIFF. "
+            "When a VERIFIED contract defines an internal service seam for a trusted external flow but VERIFIED REVIEW CONTEXT contains no integration component, review the seam itself and do not invent an integration target. "
+            "When a VERIFIED contract names the endpoint or scope a consumer must use, do not infer a broader privileged endpoint or scope that the contract does not define. "
+            "Do not use file paths or prose in evidence. Existing unchanged files may not appear in DIFF; use VERIFIED REVIEW CONTEXT before claiming an unchanged project component is absent.\n\n"
             f"DIFF:\n{git.diff_from(base_branch)}"
         )
         for attempt in range(2):
@@ -538,7 +580,11 @@ class AutonomousDevelopmentPipeline:
                         f"READ-ONLY REVIEWER REQUESTED CHANGES IN REVIEW CYCLE {review_cycle + 1}; "
                         f"TASK REPAIR ATTEMPT {repair_attempt}/{self.max_review_rounds}:\n"
                         f"{review.summary}\n\n"
-                        f"Repair only {task.id}. Do not change files outside this task's scope."
+                        f"Repair only {task.id}. Do not change files outside this task's scope. "
+                        f"Act only on concrete reviewer findings that explicitly apply to {task.id}; ignore findings that name only other TASK ids. "
+                        "REQUIREMENT, ARCHITECTURE, VERIFIED contracts, and your readable VERIFIED project context outrank reviewer prose. "
+                        "Do not invent or assume missing integration, auth, client, endpoint, event, or privileged-scope components. "
+                        "If reviewer prose depends on a project component absent from your readable verified context, do not fabricate that component; fix the supported in-scope findings instead."
                     ),
                 )
                 record = TaskRunRecord(

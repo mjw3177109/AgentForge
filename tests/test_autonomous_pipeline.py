@@ -444,7 +444,47 @@ def test_late_discovered_task_gets_its_own_repair_budget(tmp_path):
         assert "backend-v2" in (repo / "app/backend.txt").read_text("utf-8")
         assert "admin-table" in (repo / "app/admin.txt").read_text("utf-8")
         assert len(llm_handler.requests) == 12
+        first_review_prompt = llm_handler.requests[5]["body"]["messages"][1]["content"]
+        assert "REQUEST_CHANGES has a strict burden of proof" in first_review_prompt
+        assert "Do not use hypothetical or conditional concerns" in first_review_prompt
+        admin_repair_prompt = llm_handler.requests[10]["body"]["messages"][1]["content"]
+        assert "Act only on concrete reviewer findings that explicitly apply to TASK-910102" in admin_repair_prompt
+        assert "VERIFIED contracts" in admin_repair_prompt
         assert run_git(repo, "rev-list", "--count", "main..HEAD") == "6"
     finally:
         llm_server.shutdown()
+
+
+def test_reviewer_context_includes_contracts_and_declared_context(tmp_path):
+    repo, _ = make_git_repo(tmp_path)
+    contracts = repo / ".agent/contracts"
+    contracts.mkdir(parents=True)
+    (repo / ".agent/project.yaml").write_text(
+        "id: PROJECT-REVIEW-CONTEXT\nverified_contracts:\n  api: .agent/contracts/API-REVIEW.yaml\n",
+        encoding="utf-8",
+    )
+    (contracts / "API-REVIEW.yaml").write_text(
+        "id: API-REVIEW\nstatus: VERIFIED\npath: /api/verified\n",
+        encoding="utf-8",
+    )
+    (repo / "app/reviewer-context.txt").write_text(
+        "AUTH_MODE=verified-existing-session\n",
+        encoding="utf-8",
+    )
+
+    pipeline = AutonomousDevelopmentPipeline(
+        client=OpenAICompatibleClient(base_url="http://127.0.0.1:1", api_key="", model="x"),
+        repo_root=repo,
+        profiles={
+            "backend": AgentExecutionProfile(context_paths=["app/reviewer-context.txt"]),
+        },
+        allowed_verification_executables=set(),
+    )
+    context = pipeline._review_context()
+
+    assert "--- .agent/project.yaml ---" in context
+    assert "--- .agent/contracts/API-REVIEW.yaml ---" in context
+    assert "path: /api/verified" in context
+    assert "--- app/reviewer-context.txt ---" in context
+    assert "AUTH_MODE=verified-existing-session" in context
 
