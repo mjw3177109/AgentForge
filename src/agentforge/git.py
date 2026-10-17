@@ -39,7 +39,30 @@ class GitRepository:
         return self._run("rev-parse", "HEAD", cwd=cwd)
 
     def branch_exists(self, branch: str) -> bool:
-        return bool(self._run("show-ref", "--verify", f"refs/heads/{branch}", check=False))
+        proc = subprocess.run(
+            ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode not in {0, 1}:
+            raise GitError(f"Unable to inspect branch {branch}: {proc.stderr.strip()}")
+        return proc.returncode == 0
+
+    def is_ancestor(self, ancestor: str, descendant_ref: str) -> bool:
+        proc = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", ancestor, descendant_ref],
+            cwd=self.root,
+            text=True,
+            capture_output=True,
+        )
+        if proc.returncode == 0:
+            return True
+        if proc.returncode == 1:
+            return False
+        raise GitError(
+            f"Unable to verify ancestry {ancestor} -> {descendant_ref}: {proc.stderr.strip()}"
+        )
 
     def changed_files(self, cwd: Path | None = None) -> list[str]:
         out = self._run("status", "--porcelain", "-uall", cwd=cwd)
@@ -98,11 +121,7 @@ class WorktreeManager:
 
 
 class FeatureBranchManager:
-    """Maintain one integration worktree per feature/requirement.
-
-    Task branches are merged here only after task verification succeeded. The
-    feature branch can later be pushed/opened as a PR by a higher control layer.
-    """
+    """Maintain one integration worktree per feature/requirement."""
 
     def __init__(self, repo: GitRepository, worktree_root: Path | None = None):
         self.repo = repo
