@@ -98,7 +98,11 @@ class LiveFeaturePipeline:
         task_results: list[dict[str, Any]] = []
         handoff_ids: list[str] = []
         for index, task in enumerate(tasks, start=1):
-            result = TaskOrchestrator(self.repo_root, self.driver).run_task(task["id"], base_branch=feature_branch)
+            result = TaskOrchestrator(self.repo_root, self.driver).run_task(
+                task["id"],
+                base_branch=feature_branch,
+                protocol_root=feature_worktree,
+            )
             task_results.append(asdict(result))
             if result.status == "BLOCKED":
                 current = ProjectProtocol(feature_worktree).task(task["id"])
