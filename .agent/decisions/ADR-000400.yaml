@@ -1,0 +1,24 @@
+id: ADR-000400
+title: Live Coding Agent permission boundary
+status: ACCEPTED
+requirement_ids: []
+context: "V1.5 allows a live HTTP model to propose source changes without granting it direct shell, Git, network, or filesystem authority."
+decision:
+  model_output:
+    schema: AgentAction
+    allowed_operations: [write_text]
+  execution:
+    evidence_gate: required
+    policy_gate: required
+    path_preflight: required
+    verification_commands_from_model: false
+    verification_shell: false
+    repair_on_failure: true
+  security:
+    direct_git: false
+    direct_shell: false
+    arbitrary_command_execution: false
+consequences:
+  - "The orchestrator, not the model, owns verification commands."
+  - "A failed verification run feeds bounded logs into the next repair attempt."
+evidence: []
