@@ -1,0 +1,6 @@
+id: FACT-AUTH-001
+type: SECURITY
+status: ACTIVE
+statement: 后端业务代码必须通过 CurrentUserProvider 获取当前用户ID，不得自行发明请求头、Query 参数或客户端提交的 userId 作为身份来源。
+source:
+  - ADR-000201

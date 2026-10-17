@@ -1,0 +1,24 @@
+id: ADR-000201
+title: 商品收藏数据模型与后端接口
+status: ACCEPTED
+requirement_ids:
+  - REQ-000201
+context: 商品收藏作为独立关系表实现，禁止前端自行定义接口。
+decision:
+  database:
+    table: user_product_favorite
+    unique: [user_id, product_id]
+  auth:
+    fact: FACT-AUTH-001
+    provider: CurrentUserProvider
+  api:
+    create:
+      - POST /api/favorites/{productId}
+      - DELETE /api/favorites/{productId}
+      - GET /api/favorites
+      - GET /api/favorites/{productId}/status
+  admin:
+    change_required: false
+consequences:
+  - 收藏写操作必须使用当前认证用户ID
+  - 同一用户重复收藏必须保持幂等
