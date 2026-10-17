@@ -30,8 +30,10 @@ class TaskRunResult:
 class TaskOrchestrator:
     """Control-plane execution of exactly one Task.
 
-    The LLM only returns AgentAction. Git, verification and state transitions
-    remain deterministic Core responsibilities.
+    The primary repository remains the Git control root. `protocol_root` may be
+    a linked feature worktree containing newly planned REQ/ADR/TASK artifacts
+    that have not yet reached the primary/base worktree. The model still runs
+    only inside a fresh task worktree created from `base_branch`.
     """
 
     def __init__(self, repo_root: Path, driver: AgentDriver):
@@ -50,12 +52,26 @@ class TaskOrchestrator:
         transitions.append(f"{current}->RUNNING")
         return transitions
 
-    def run_task(self, task_id: str, base_branch: str | None = None) -> TaskRunResult:
-        base_protocol = ProjectProtocol(self.repo_root)
-        base_task = base_protocol.task(task_id)
-        if base_task.get("status") not in {"PENDING", "READY", "FAILED", "BLOCKED"}:
-            raise ValueError(f"Task is not runnable from state {base_task.get('status')}")
-        transitions = self._to_running(base_task["status"])
+    def run_task(
+        self,
+        task_id: str,
+        base_branch: str | None = None,
+        protocol_root: Path | None = None,
+    ) -> TaskRunResult:
+        source_root = (protocol_root or self.repo_root).resolve()
+        source_git = GitRepository(source_root)
+        source_git.ensure()
+        if base_branch is not None and source_git.current_branch() != base_branch:
+            raise ValueError(
+                f"Protocol source branch mismatch: expected {base_branch}, "
+                f"got {source_git.current_branch()}"
+            )
+
+        source_protocol = ProjectProtocol(source_root)
+        source_task = source_protocol.task(task_id)
+        if source_task.get("status") not in {"PENDING", "READY", "FAILED", "BLOCKED"}:
+            raise ValueError(f"Task is not runnable from state {source_task.get('status')}")
+        transitions = self._to_running(source_task["status"])
 
         git = GitRepository(self.repo_root)
         git.ensure()
@@ -120,7 +136,11 @@ class FeatureOrchestrator:
 
     def run_task(self, feature_id: str, task_id: str, base_branch: str | None = None) -> FeatureTaskResult:
         feature_worktree, feature_branch = FeatureBranchManager(self.git).create(feature_id, base_branch)
-        task_result = TaskOrchestrator(self.repo_root, self.driver).run_task(task_id, base_branch=feature_branch)
+        task_result = TaskOrchestrator(self.repo_root, self.driver).run_task(
+            task_id,
+            base_branch=feature_branch,
+            protocol_root=feature_worktree,
+        )
         integration_sha = None
         if task_result.status == "DONE" and task_result.commit_sha:
             integration_sha = FeatureBranchManager(self.git).merge_task(
