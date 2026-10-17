@@ -10,7 +10,7 @@ on:
         required: true
         default: "probe"
         type: choice
-        options: [probe, plan]
+        options: [probe, plan, autonomous]
       request:
         description: "Requirement text for plan mode"
         required: false
@@ -69,3 +69,91 @@ jobs:
       - name: External model not configured
         if: steps.llm.outputs.configured != 'true'
         run: echo "SKIPPED_REAL_MODEL=true"
+
+  autonomous-live-benchmark:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'autonomous')
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: agentforge
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+    env:
+      AGENTFORGE_LLM_BASE_URL: ${{ vars.AGENTFORGE_LLM_BASE_URL }}
+      AGENTFORGE_LLM_MODEL: ${{ vars.AGENTFORGE_LLM_MODEL }}
+      AGENTFORGE_LLM_API_KEY: ${{ secrets.AGENTFORGE_LLM_API_KEY }}
+      AGENTFORGE_LLM_ALLOW_ANONYMOUS: ${{ vars.AGENTFORGE_LLM_ALLOW_ANONYMOUS }}
+      AGENTFORGE_LLM_TIMEOUT: "90"
+      AGENTFORGE_LLM_MAX_ATTEMPTS: "3"
+      AGENTFORGE_BENCHMARK_ARTIFACT_DIR: artifacts/v18-live-autonomous
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install MySQL and Redis clients
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-mysql-client redis-tools
+      - name: Install AgentForge
+        run: python -m pip install -e ".[dev]"
+      - name: Detect external model configuration
+        id: llm
+        shell: bash
+        run: |
+          if [[ -n "$AGENTFORGE_LLM_BASE_URL" && -n "$AGENTFORGE_LLM_MODEL" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Real external model configured for autonomous benchmark."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "External model is not configured; autonomous benchmark will be skipped."
+          fi
+      - name: Verify service readiness
+        if: steps.llm.outputs.configured == 'true'
+        run: |
+          mysql --protocol=TCP -h127.0.0.1 -P3306 -uroot -proot agentforge -e "SELECT 1;"
+          redis-cli -h 127.0.0.1 -p 6379 PING
+      - name: Run real external-LLM autonomous benchmark
+        if: steps.llm.outputs.configured == 'true'
+        run: python scripts/run_v18_live_autonomous_benchmark.py
+      - name: Autonomous benchmark not configured
+        if: steps.llm.outputs.configured != 'true'
+        run: echo "SKIPPED_REAL_AUTONOMOUS=true"
+      - name: Upload autonomous benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v18-live-autonomous-evidence
+          path: artifacts/v18-live-autonomous
+          if-no-files-found: ignore
+          retention-days: 7
