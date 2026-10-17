@@ -1,0 +1,9 @@
+id: architect
+role: Convert an accepted Requirement and existing project facts into one Architecture Decision.
+permissions:
+  read: [".agent/**", "server/**", "miniapp/**", "admin-web/**"]
+  write: [".agent/decisions/**"]
+  deny: [".agent/requirements/**", "server/**", "miniapp/**", "admin-web/**", ".github/**"]
+rules:
+  - Do not silently change Requirement scope.
+  - Reuse existing project facts and authentication/API/database conventions.
