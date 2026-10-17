@@ -28,6 +28,7 @@ jobs:
       AGENTFORGE_LLM_MODEL: ${{ vars.AGENTFORGE_LLM_MODEL }}
       AGENTFORGE_LLM_API_KEY: ${{ secrets.AGENTFORGE_LLM_API_KEY }}
       AGENTFORGE_LLM_ALLOW_ANONYMOUS: ${{ vars.AGENTFORGE_LLM_ALLOW_ANONYMOUS }}
+      AGENTFORGE_LIVE_REQUEST: ${{ vars.AGENTFORGE_LIVE_REQUEST }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,7 +53,14 @@ jobs:
       - name: Probe real external model
         if: steps.llm.outputs.configured == 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'probe')
         run: agentforge model-check
-      - name: Plan with real external model
+      - name: Plan with real external model on branch push
+        if: steps.llm.outputs.configured == 'true' && github.event_name == 'push'
+        shell: bash
+        run: |
+          REQUEST="${AGENTFORGE_LIVE_REQUEST:-给商城增加积分功能}"
+          echo "Running real-model planning for configured live request."
+          agentforge plan "$REQUEST" --req-id REQ-980001 --adr-id ADR-980001
+      - name: Plan with real external model on manual dispatch
         if: steps.llm.outputs.configured == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode == 'plan'
         env:
           AGENTFORGE_REQUEST: ${{ inputs.request }}
