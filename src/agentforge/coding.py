@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from typing import Literal
 
@@ -91,38 +93,59 @@ class TaskContextBuilder:
         return "\n\n".join(chunks)
 
 
+def _verification_copy_ignore(directory: str, names: list[str]) -> set[str]:
+    ignored: set[str] = set()
+    base = Path(directory)
+    for name in names:
+        candidate = base / name
+        if name in {".git", "__pycache__"} or name.endswith(".pyc") or candidate.is_symlink():
+            ignored.add(name)
+    return ignored
+
+
 class VerificationRunner:
     def __init__(self, repo_root: Path, allowed_executables: set[str]):
         self.repo_root = repo_root.resolve()
         self.allowed_executables = set(allowed_executables)
 
     def run(self, specs: list[VerificationSpec]) -> list[VerificationResult]:
-        results: list[VerificationResult] = []
         for spec in specs:
             executable = Path(spec.argv[0]).name
             if executable not in self.allowed_executables:
                 raise PolicyDenied(f"Verification executable denied: {executable}")
-            cwd_rel = norm(spec.cwd)
-            cwd = (self.repo_root / cwd_rel).resolve()
-            if cwd != self.repo_root and self.repo_root not in cwd.parents:
-                raise PolicyDenied(f"Verification cwd escapes repository: {spec.cwd}")
-            if not cwd.is_dir():
-                raise PolicyDenied(f"Verification cwd does not exist: {spec.cwd}")
-            completed = subprocess.run(
-                spec.argv,
-                cwd=cwd,
-                shell=False,
-                capture_output=True,
-                text=True,
-                timeout=spec.timeout_seconds,
+            norm(spec.cwd)
+
+        results: list[VerificationResult] = []
+        with tempfile.TemporaryDirectory(prefix="agentforge-verify-") as temp_dir:
+            sandbox_root = Path(temp_dir) / "workspace"
+            shutil.copytree(
+                self.repo_root,
+                sandbox_root,
+                symlinks=False,
+                ignore=_verification_copy_ignore,
             )
-            results.append(VerificationResult(
-                argv=spec.argv,
-                returncode=completed.returncode,
-                stdout=completed.stdout[-12000:],
-                stderr=completed.stderr[-12000:],
-                success=completed.returncode == 0,
-            ))
+            for spec in specs:
+                cwd_rel = norm(spec.cwd)
+                cwd = (sandbox_root / cwd_rel).resolve()
+                if cwd != sandbox_root and sandbox_root not in cwd.parents:
+                    raise PolicyDenied(f"Verification cwd escapes sandbox: {spec.cwd}")
+                if not cwd.is_dir():
+                    raise PolicyDenied(f"Verification cwd does not exist: {spec.cwd}")
+                completed = subprocess.run(
+                    spec.argv,
+                    cwd=cwd,
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=spec.timeout_seconds,
+                )
+                results.append(VerificationResult(
+                    argv=spec.argv,
+                    returncode=completed.returncode,
+                    stdout=completed.stdout[-12000:],
+                    stderr=completed.stderr[-12000:],
+                    success=completed.returncode == 0,
+                ))
         return results
 
 
