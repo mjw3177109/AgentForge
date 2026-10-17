@@ -8,3 +8,4 @@ class StateTransitionError(AgentForgeError): pass
 class VerificationError(AgentForgeError): pass
 class GitError(AgentForgeError): pass
 class PlanningError(AgentForgeError): pass
+class MemorySyncError(AgentForgeError): pass
