@@ -124,9 +124,8 @@ agents:
           - -P3306
           - -uroot
           - -proot
-          - agentforge
           - -e
-          - "DROP TABLE IF EXISTS user_points_ledger; DROP TABLE IF EXISTS user_points_account; source database/migrations/V980100__points.sql; SHOW CREATE TABLE user_points_account; SHOW CREATE TABLE user_points_ledger;"
+          - "DROP DATABASE IF EXISTS agentforge; CREATE DATABASE agentforge; USE agentforge; source database/migrations/V980100__points.sql; ALTER TABLE user_points_account ENGINE=InnoDB; ALTER TABLE user_points_ledger ENGINE=InnoDB; SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA='agentforge' AND TABLE_NAME IN ('user_points_account','user_points_ledger') ORDER BY TABLE_NAME; SHOW CREATE TABLE user_points_account; SHOW CREATE TABLE user_points_ledger;"
         cwd: .
         timeout_seconds: 60
   backend:
@@ -199,7 +198,7 @@ agents:
         """# Database contract
 
 The points migration for REQ-980100 must be exactly `database/migrations/V980100__points.sql`.
-It must create `user_points_account` and `user_points_ledger`.
+It must create `user_points_account` and `user_points_ledger` as real MySQL BASE TABLE objects, not views or aliases.
 The ledger must make `business_no` unique so repeated processing of the same business event cannot double-credit points.
 MySQL is the source of truth.
 """,
