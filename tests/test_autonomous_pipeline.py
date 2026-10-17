@@ -313,3 +313,138 @@ def test_pr_requires_push(tmp_path):
         assert False, "create_pr without push should fail"
     except ValueError as exc:
         assert "push=True" in str(exc)
+
+
+def test_late_discovered_task_gets_its_own_repair_budget(tmp_path):
+    repo, _ = make_git_repo(tmp_path)
+    responses = [
+        {
+            "id": "REQ-910001",
+            "title": "late review repair budget",
+            "actors": ["USER"],
+            "modules": ["backend", "admin"],
+            "business_rules": ["both tasks must converge"],
+            "acceptance": ["late-discovered admin issue can still be repaired"],
+            "out_of_scope": [],
+        },
+        {
+            "id": "ADR-910001",
+            "requirement_ids": ["REQ-910001"],
+            "decision": {
+                "backend": {"change_required": True},
+                "admin": {"change_required": True},
+            },
+            "evidence": ["REQ-910001"],
+        },
+        {
+            "tasks": [
+                {
+                    "id": "TASK-910101",
+                    "requirement_ids": ["REQ-910001"],
+                    "adr_ids": ["ADR-910001"],
+                    "assigned_agent": "backend",
+                    "dependencies": [],
+                    "scope": {"read": ["app/**"], "write": ["app/**"], "deny": [".agent/**"]},
+                    "acceptance": ["backend converges"],
+                    "verification": [],
+                },
+                {
+                    "id": "TASK-910102",
+                    "requirement_ids": ["REQ-910001"],
+                    "adr_ids": ["ADR-910001"],
+                    "assigned_agent": "admin",
+                    "dependencies": ["TASK-910101"],
+                    "scope": {"read": ["app/**"], "write": ["app/**"], "deny": [".agent/**"]},
+                    "acceptance": ["admin converges"],
+                    "verification": [],
+                },
+            ]
+        },
+        {
+            "status": "SUCCESS",
+            "summary": "initial backend",
+            "evidence": ["REQ-910001", "ADR-910001", "TASK-910101"],
+            "operations": [{"op": "write_text", "path": "app/backend.txt", "content": "backend-v0\n"}],
+        },
+        {
+            "status": "SUCCESS",
+            "summary": "initial admin",
+            "evidence": ["REQ-910001", "ADR-910001", "TASK-910102"],
+            "operations": [{"op": "write_text", "path": "app/admin.txt", "content": "admin-raw\n"}],
+        },
+        {
+            "status": "REQUEST_CHANGES",
+            "summary": "backend issue one",
+            "evidence": ["REQ-910001", "ADR-910001", "TASK-910101"],
+        },
+        {
+            "status": "SUCCESS",
+            "summary": "backend repair one",
+            "evidence": ["REQ-910001", "ADR-910001", "TASK-910101"],
+            "operations": [{"op": "write_text", "path": "app/backend.txt", "content": "backend-v1\n"}],
+        },
+        {
+            "status": "REQUEST_CHANGES",
+            "summary": "backend issue two",
+            "evidence": ["REQ-910001", "ADR-910001", "TASK-910101"],
+        },
+        {
+            "status": "SUCCESS",
+            "summary": "backend repair two",
+            "evidence": ["REQ-910001", "ADR-910001", "TASK-910101"],
+            "operations": [{"op": "write_text", "path": "app/backend.txt", "content": "backend-v2\n"}],
+        },
+        {
+            "status": "REQUEST_CHANGES",
+            "summary": "backend remains exhausted; admin issue discovered late",
+            "evidence": ["REQ-910001", "ADR-910001", "TASK-910101", "TASK-910102"],
+        },
+        {
+            "status": "SUCCESS",
+            "summary": "admin late repair",
+            "evidence": ["REQ-910001", "ADR-910001", "TASK-910102"],
+            "operations": [{"op": "write_text", "path": "app/admin.txt", "content": "admin-table\n"}],
+        },
+        {
+            "status": "APPROVE",
+            "summary": "late admin issue repaired; exhausted backend received no third repair",
+            "evidence": ["REQ-910001", "ADR-910001", "TASK-910101", "TASK-910102"],
+        },
+    ]
+    llm_server, llm_handler = start_server(SequenceHandler, responses)
+    try:
+        pipeline = AutonomousDevelopmentPipeline(
+            client=client_for(llm_server),
+            repo_root=repo,
+            profiles={
+                "backend": AgentExecutionProfile(),
+                "admin": AgentExecutionProfile(),
+            },
+            allowed_verification_executables=set(),
+            max_coding_attempts=1,
+            max_review_rounds=2,
+        )
+        result = pipeline.run(
+            "exercise per-task review repair budgets",
+            base_branch="main",
+            requirement_id="REQ-910001",
+            adr_id="ADR-910001",
+            feature_branch="feature/REQ-910001-review-budget",
+        )
+
+        assert result.status == "SUCCESS"
+        assert result.review and result.review.status == "APPROVE"
+        assert [record.task_id for record in result.task_runs] == [
+            "TASK-910101",
+            "TASK-910102",
+            "TASK-910101",
+            "TASK-910101",
+            "TASK-910102",
+        ]
+        assert "backend-v2" in (repo / "app/backend.txt").read_text("utf-8")
+        assert "admin-table" in (repo / "app/admin.txt").read_text("utf-8")
+        assert len(llm_handler.requests) == 12
+        assert run_git(repo, "rev-list", "--count", "main..HEAD") == "6"
+    finally:
+        llm_server.shutdown()
+
