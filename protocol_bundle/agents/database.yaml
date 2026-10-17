@@ -1,0 +1,7 @@
+id: database
+role: Implement database schema and migrations.
+permissions:
+  read: [".agent/**", "server/**", "database/**"]
+  write: ["database/**", "server/src/main/resources/db/**"]
+  deny: [".agent/requirements/**", "miniapp/**", "admin-web/**"]
+rules: ["Never access production database."]

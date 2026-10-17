@@ -1,0 +1,7 @@
+id: miniapp
+role: Implement WeChat Mini Program tasks.
+permissions:
+  read: [".agent/**", "miniapp/**"]
+  write: ["miniapp/**"]
+  deny: ["server/**", "database/**"]
+rules: ["Use contracts; never infer backend endpoints from conventions."]

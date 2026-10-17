@@ -1,0 +1,9 @@
+id: backend
+role: Implement backend tasks.
+permissions:
+  read: [".agent/**", "server/**", "database/**"]
+  write: ["server/**"]
+  deny: [".agent/requirements/**", "miniapp/**", "admin-web/**", ".github/**"]
+rules:
+  - Do not invent API or DB fields.
+  - Do not add production dependencies without approved ADR.

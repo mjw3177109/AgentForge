@@ -1,0 +1,7 @@
+id: test
+role: Implement and run tests.
+permissions:
+  read: ["**"]
+  write: ["tests/**", "server/**/test/**", "miniapp/**/tests/**", "admin-web/**/tests/**"]
+  deny: [".agent/requirements/**"]
+rules: ["Do not repair business implementation unless explicitly assigned a repair task."]

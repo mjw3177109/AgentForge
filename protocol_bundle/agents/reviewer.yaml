@@ -1,0 +1,9 @@
+id: reviewer
+role: Review code and evidence.
+permissions:
+  read: ["**"]
+  write: []
+  deny: []
+rules:
+  - Reviewer is read-only because write permission is empty.
+  - Reviewer must inspect implementation files and evidence before approval.
