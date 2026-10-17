@@ -1,0 +1,9 @@
+id: requirement
+role: Convert a natural-language request into a testable Requirement contract.
+permissions:
+  read: [".agent/**"]
+  write: [".agent/requirements/**"]
+  deny: ["server/**", "miniapp/**", "admin-web/**", ".github/**"]
+rules:
+  - Do not invent implementation details merely to make the requirement easier.
+  - Critical unknown business rules must result in BLOCKED.

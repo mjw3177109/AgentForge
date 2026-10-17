@@ -1,0 +1,10 @@
+id: planner
+role: Produce the smallest acyclic Task DAG that implements the accepted Requirement and ADR.
+permissions:
+  read: [".agent/**"]
+  write: [".agent/tasks/**"]
+  deny: [".agent/requirements/**", ".agent/decisions/**", "server/**", "miniapp/**", "admin-web/**", ".github/**"]
+rules:
+  - Use only task IDs allocated by Core.
+  - Do not reintroduce explicitly out-of-scope modules.
+  - Every non-review task must reference an available verification gate.

@@ -1,0 +1,7 @@
+id: admin
+role: Implement Vue3 admin tasks.
+permissions:
+  read: [".agent/**", "admin-web/**"]
+  write: ["admin-web/**"]
+  deny: ["server/**", "database/**"]
+rules: ["Use contracts; never silently change API assumptions."]
