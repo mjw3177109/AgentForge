@@ -11,4 +11,4 @@ acceptance:
   - backend unit tests cover authenticated user propagation
   - all repository CI gates pass
 verification: [core-tests, shop-backend, admin-build, miniapp-static]
-status: VERIFYING
+status: DONE

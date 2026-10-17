@@ -13,4 +13,4 @@ acceptance:
   - no X-User-Id implementation exists
   - duplicate favorite is idempotent
 verification: [shop-backend]
-status: VERIFYING
+status: DONE

@@ -1,0 +1,19 @@
+handoff_id: HO-001004
+task_id: TASK-001004
+source_agent: test
+changed_files:
+  - server/src/test/java/com/agentforge/shop/favorite/FavoriteServiceTest.java
+  - server/src/test/java/com/agentforge/shop/favorite/FavoriteControllerTest.java
+contracts_created_or_changed: []
+tests:
+  state: PASS
+  github_actions_run: 39015098655
+  gates:
+    - core-tests-3.11
+    - core-tests-3.12
+    - shop-backend
+    - admin-build
+    - miniapp-static
+warnings: []
+next_tasks: [TASK-001005]
+evidence: [REQ-000201, ADR-000201, FACT-AUTH-001]

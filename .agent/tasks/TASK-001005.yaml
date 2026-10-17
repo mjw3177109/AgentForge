@@ -13,4 +13,4 @@ acceptance:
   - admin-web is unchanged by the feature
   - all CI gates pass
 verification: [review, ci]
-status: VERIFYING
+status: DONE

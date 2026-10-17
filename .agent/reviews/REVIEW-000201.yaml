@@ -1,0 +1,23 @@
+id: REVIEW-000201
+requirement_id: REQ-000201
+result: PASS
+reviewed_head: c95c4e6965c591718bd8515efc8f9d5395341981
+checks:
+  scope:
+    result: PASS
+    evidence: compare agentforge/v1.3-shop-template...agentforge/benchmark-favorite contains no admin-web files
+  authentication:
+    result: PASS
+    evidence: FavoriteController accepts CurrentUser and forwards currentUser.getUserId()
+  ci:
+    result: PASS
+    github_actions_run: 39015098655
+    gates:
+      core_3_11: PASS
+      core_3_12: PASS
+      shop_backend: PASS
+      admin_build: PASS
+      miniapp_static: PASS
+  memory:
+    result: PASS
+    evidence: no long-term memory update before merge

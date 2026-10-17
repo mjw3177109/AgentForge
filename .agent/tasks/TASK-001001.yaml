@@ -12,4 +12,4 @@ acceptance:
   - UNIQUE(user_id, product_id) exists
   - user/product foreign keys exist
 verification: [shop-backend]
-status: VERIFYING
+status: DONE

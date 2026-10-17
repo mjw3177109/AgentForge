@@ -7,10 +7,11 @@ changed_files:
   - server/src/main/java/com/agentforge/shop/favorite/FavoriteService.java
   - server/src/main/java/com/agentforge/shop/favorite/FavoriteController.java
   - server/src/main/java/com/agentforge/shop/favorite/ProductFavoriteController.java
-contracts_created_or_changed:
-  - API-FAVORITE-001
+contracts_created_or_changed: [API-FAVORITE-001]
 tests:
-  state: pending_ci
+  state: PASS
+  github_actions_run: 39015098655
+  gate: shop-backend
 warnings: []
 next_tasks: [TASK-001003, TASK-001004]
 evidence: [REQ-000201, ADR-000201, API-FAVORITE-001, FACT-AUTH-001]
