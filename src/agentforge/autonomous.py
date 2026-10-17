@@ -14,9 +14,13 @@ from pydantic import BaseModel, Field, model_validator
 from agentforge.coding import CodingResult, LiveCodingRuntime, VerificationSpec
 from agentforge.contracts import ArchitectureDraft, RequirementDraft, TaskBundle, TaskDraft
 from agentforge.evidence import EvidenceIndex
+from agentforge.errors import EvidenceError, PolicyDenied
 from agentforge.live import LivePlanningPipeline
 from agentforge.llm import OpenAICompatibleClient
-from agentforge.policy import PolicyEngine
+from agentforge.policy import PolicyEngine, norm
+
+
+_EVIDENCE_ID_RE = re.compile(r"^(REQ|ADR|TASK|FACT|API|DB|RULE|SEC|MEM)-[A-Za-z0-9._:-]+$")
 
 
 class AgentExecutionProfile(BaseModel):
@@ -34,8 +38,13 @@ class ReviewDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_review(self):
+        invalid = [item for item in self.evidence if not _EVIDENCE_ID_RE.fullmatch(item)]
+        if invalid:
+            raise ValueError("Reviewer evidence must contain repository evidence IDs, never prose or file paths")
         if self.status == "APPROVE" and not self.evidence:
             raise ValueError("APPROVE requires evidence")
+        if self.status == "REQUEST_CHANGES" and not any(item.startswith("TASK-") for item in self.evidence):
+            raise ValueError("REQUEST_CHANGES requires at least one affected TASK evidence id")
         return self
 
 
@@ -226,12 +235,14 @@ class AutonomousDevelopmentPipeline:
         profiles: dict[str, AgentExecutionProfile],
         allowed_verification_executables: set[str],
         max_coding_attempts: int = 2,
+        max_review_rounds: int = 2,
     ):
         self.client = client
         self.repo_root = repo_root.resolve()
         self.profiles = profiles
         self.allowed_verification_executables = set(allowed_verification_executables)
         self.max_coding_attempts = max_coding_attempts
+        self.max_review_rounds = max_review_rounds
 
     def _project_context(self) -> str:
         path = self.repo_root / ".agent/project.yaml"
@@ -298,6 +309,86 @@ class AutonomousDevelopmentPipeline:
         for context_path in profile.context_paths:
             policy.require_read(context_path)
 
+    def _repair_context_paths(self, task: TaskDraft, profile: AgentExecutionProfile) -> list[str]:
+        paths = list(profile.context_paths)
+        policy = PolicyEngine(read=task.scope.read, write=task.scope.write, deny=task.scope.deny)
+        candidates: set[str] = set()
+        for raw in task.scope.write:
+            clean = str(raw).replace("\\", "/").strip()
+            if clean.endswith("/"):
+                root = self.repo_root / norm(clean)
+                if root.is_dir():
+                    for path in root.rglob("*"):
+                        if path.is_file() and not path.is_symlink():
+                            candidates.add(path.relative_to(self.repo_root).as_posix())
+            elif any(char in clean for char in "*?["):
+                for path in self.repo_root.glob(clean):
+                    if path.is_file() and not path.is_symlink():
+                        candidates.add(path.relative_to(self.repo_root).as_posix())
+            else:
+                path = self.repo_root / norm(clean)
+                if path.is_file() and not path.is_symlink():
+                    candidates.add(path.relative_to(self.repo_root).as_posix())
+
+        for rel in sorted(candidates):
+            try:
+                policy.require_read(rel)
+            except PolicyDenied:
+                continue
+            if rel not in paths:
+                paths.append(rel)
+            if len(paths) >= 40:
+                break
+        return paths
+
+    def _review(
+        self,
+        *,
+        plan,
+        task_runs: list[TaskRunRecord],
+        base_branch: str,
+        git: GitWorkspace,
+    ) -> ReviewDecision:
+        evidence_index = EvidenceIndex(self.repo_root).build()
+        evidence_ids = sorted(evidence_index.ids)
+        prompt = (
+            f"REQUIREMENT:\n{plan.requirement.model_dump_json()}\n\n"
+            f"ARCHITECTURE:\n{plan.architecture.model_dump_json()}\n\n"
+            f"TASKS:\n{plan.tasks.model_dump_json()}\n\n"
+            f"TASK RUNS (orchestrator-recorded verification status):\n"
+            f"{json.dumps([record.model_dump() for record in task_runs], ensure_ascii=False, indent=2)}\n\n"
+            f"VERIFIED PROJECT CONTEXT:\n{self._project_context()}\n\n"
+            "AVAILABLE EVIDENCE IDS:\n"
+            f"{json.dumps(evidence_ids, ensure_ascii=False)}\n\n"
+            "Put all criticism and requested changes in summary. evidence must contain ONLY exact IDs from AVAILABLE EVIDENCE IDS. "
+            "For REQUEST_CHANGES, include every affected TASK id in evidence so the orchestrator can route repairs. "
+            "Do not use file paths or prose in evidence. Existing unchanged files may not appear in DIFF; do not claim they are absent solely because they are not in DIFF.\n\n"
+            f"DIFF:\n{git.diff_from(base_branch)}"
+        )
+        for attempt in range(2):
+            review = self.client.complete_model(
+                system=(
+                    "You are the read-only AgentForge reviewer. Return JSON only. "
+                    "Do not propose file writes. APPROVE only if the diff is within the requirement/ADR/task scope, "
+                    "cross-stack contracts are consistent, security/business rules are preserved, and all task verification passed. "
+                    "REQUEST_CHANGES must be routed through affected TASK evidence IDs."
+                ),
+                user=prompt,
+                schema=ReviewDecision,
+            )
+            try:
+                evidence_index.require(review.evidence)
+                return review
+            except EvidenceError as exc:
+                if attempt == 0:
+                    prompt += (
+                        "\n\nThe previous reviewer output used unknown evidence. Correct only the evidence field using exact AVAILABLE EVIDENCE IDS. "
+                        f"Validation error: {exc}"
+                    )
+                    continue
+                raise
+        raise RuntimeError("Reviewer did not return valid evidence")
+
     def run(
         self,
         request: str,
@@ -327,6 +418,7 @@ class AutonomousDevelopmentPipeline:
             task_constraints=self._task_constraints(),
         )
         ordered_tasks = topological_tasks(plan.tasks)
+        task_by_id = {task.id: task for task in ordered_tasks}
         for task in ordered_tasks:
             if task.assigned_agent not in self.profiles:
                 raise ValueError(f"No execution profile for agent {task.assigned_agent}")
@@ -372,32 +464,105 @@ class AutonomousDevelopmentPipeline:
             record.commit = git.commit_all(f"feat({task.assigned_agent}): complete {task.id}")
             task_runs.append(record)
 
-        diff = git.diff_from(base_branch)
-        review = self.client.complete_model(
-            system=(
-                "You are the read-only AgentForge reviewer. Return JSON only. "
-                "Do not propose file writes. APPROVE only if the diff is within the requirement/ADR/task scope "
-                "and all task verification passed."
-            ),
-            user=(
-                f"REQUIREMENT:\n{plan.requirement.model_dump_json()}\n\n"
-                f"ARCHITECTURE:\n{plan.architecture.model_dump_json()}\n\n"
-                f"TASKS:\n{plan.tasks.model_dump_json()}\n\n"
-                f"DIFF:\n{diff}"
-            ),
-            schema=ReviewDecision,
-        )
-        EvidenceIndex(self.repo_root).build().require(review.evidence)
-        if review.status != "APPROVE":
-            return AutonomousResult(
-                status="BLOCKED" if review.status == "BLOCKED" else "REVIEW_CHANGES",
-                requirement_id=plan.requirement.id,
-                adr_id=plan.architecture.id,
-                feature_branch=branch,
+        review: ReviewDecision | None = None
+        for review_round in range(self.max_review_rounds + 1):
+            review = self._review(
+                plan=plan,
                 task_runs=task_runs,
-                review=review,
-                message=review.summary,
+                base_branch=base_branch,
+                git=git,
             )
+            if review.status == "APPROVE":
+                break
+            if review.status == "BLOCKED":
+                return AutonomousResult(
+                    status="BLOCKED",
+                    requirement_id=plan.requirement.id,
+                    adr_id=plan.architecture.id,
+                    feature_branch=branch,
+                    task_runs=task_runs,
+                    review=review,
+                    message=review.summary,
+                )
+            if review_round >= self.max_review_rounds:
+                return AutonomousResult(
+                    status="REVIEW_CHANGES",
+                    requirement_id=plan.requirement.id,
+                    adr_id=plan.architecture.id,
+                    feature_branch=branch,
+                    task_runs=task_runs,
+                    review=review,
+                    message=review.summary,
+                )
+
+            affected_ids = [item for item in review.evidence if item.startswith("TASK-")]
+            if not affected_ids:
+                return AutonomousResult(
+                    status="REVIEW_CHANGES",
+                    requirement_id=plan.requirement.id,
+                    adr_id=plan.architecture.id,
+                    feature_branch=branch,
+                    task_runs=task_runs,
+                    review=review,
+                    message="Reviewer requested changes without routable TASK evidence.",
+                )
+
+            for task in ordered_tasks:
+                if task.id not in affected_ids:
+                    continue
+                profile = self.profiles[task.assigned_agent]
+                runtime = LiveCodingRuntime(
+                    self.client,
+                    self.repo_root,
+                    self.allowed_verification_executables,
+                    max_attempts=self.max_coding_attempts,
+                )
+                result = runtime.execute(
+                    task,
+                    context_paths=self._repair_context_paths(task, profile),
+                    verification=profile.verification,
+                    initial_feedback=(
+                        f"READ-ONLY REVIEWER REQUESTED CHANGES IN REVIEW ROUND {review_round + 1}:\n"
+                        f"{review.summary}\n\n"
+                        f"Repair only {task.id}. Do not change files outside this task's scope."
+                    ),
+                )
+                record = TaskRunRecord(
+                    task_id=task.id,
+                    agent=task.assigned_agent,
+                    status=result.status,
+                    attempts=result.attempts,
+                    message=f"review repair round {review_round + 1}: {result.message}",
+                )
+                if result.status != "SUCCESS":
+                    task_runs.append(record)
+                    return AutonomousResult(
+                        status="BLOCKED" if result.status == "BLOCKED" else "FAILED",
+                        requirement_id=plan.requirement.id,
+                        adr_id=plan.architecture.id,
+                        feature_branch=branch,
+                        task_runs=task_runs,
+                        review=review,
+                        message=f"Reviewer repair for {task.id} did not complete successfully",
+                    )
+                if not git.has_changes():
+                    task_runs.append(record)
+                    return AutonomousResult(
+                        status="REVIEW_CHANGES",
+                        requirement_id=plan.requirement.id,
+                        adr_id=plan.architecture.id,
+                        feature_branch=branch,
+                        task_runs=task_runs,
+                        review=review,
+                        message=f"Reviewer requested changes for {task.id}, but repair produced no repository diff.",
+                    )
+                record.commit = git.commit_all(
+                    f"fix({task.assigned_agent}): review repair {task.id} round {review_round + 1}"
+                )
+                task_runs.append(record)
+
+        if review is None or review.status != "APPROVE":
+            raise RuntimeError("Autonomous review loop ended without a decision")
 
         if push:
             git.push(remote, branch)
