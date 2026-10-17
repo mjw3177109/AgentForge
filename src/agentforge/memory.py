@@ -2,14 +2,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+import re
 import shutil
 import yaml
 
 from agentforge.delivery import FeatureDeliveryService
-from agentforge.errors import MemorySyncError
+from agentforge.errors import GitError, MemorySyncError
 from agentforge.git import GitRepository
+from agentforge.github import GitHubAppClient
 from agentforge.protocol.loader import ProjectProtocol
 from agentforge.util import dump_yaml
+
+
+REQ_ID_RE = re.compile(r"^REQ-[0-9A-Z][0-9A-Z-]{5,31}$")
 
 
 @dataclass
@@ -131,13 +136,29 @@ class PostMergeMemoryService:
             lines += ["", "## Changed files recorded by handoffs", ""] + [f"- `{path}`" for path in changed]
         return "\n".join(lines).rstrip() + "\n"
 
+    def _verify_source_requirement(self, requirement_id: str, merged_commit_sha: str) -> None:
+        if not REQ_ID_RE.match(requirement_id):
+            raise MemorySyncError(f"Invalid Requirement ID: {requirement_id}")
+        rel = f".agent/requirements/{requirement_id}.yaml"
+        try:
+            raw = self.git.show_file_at_ref(merged_commit_sha, rel)
+            value = yaml.safe_load(raw)
+        except (GitError, yaml.YAMLError) as exc:
+            raise MemorySyncError(
+                f"Memory source commit {merged_commit_sha} does not contain {requirement_id}"
+            ) from exc
+        if not isinstance(value, dict) or value.get("id") != requirement_id:
+            raise MemorySyncError(
+                f"Memory source commit {merged_commit_sha} contains invalid evidence for {requirement_id}"
+            )
+
     def prepare(
         self,
         requirement_id: str,
         merged_commit_sha: str,
         *,
         pr_number: int | None = None,
-        delivery: FeatureDeliveryService | None = None,
+        github: GitHubAppClient | None = None,
         create_pr: bool = False,
         push: bool = False,
         draft_pr: bool = False,
@@ -148,6 +169,7 @@ class PostMergeMemoryService:
             raise MemorySyncError(
                 f"Memory source commit {merged_commit_sha} is not merged into {default_branch}"
             )
+        self._verify_source_requirement(requirement_id, merged_commit_sha)
 
         worktree, branch = MemoryBranchManager(self.git).create(requirement_id, default_branch)
         protocol = ProjectProtocol(worktree)
@@ -160,17 +182,18 @@ class PostMergeMemoryService:
 
         adrs = self._related_yaml(worktree, "decisions", requirement_id)
         tasks = self._related_yaml(worktree, "tasks", requirement_id)
-        handoffs = self._related_yaml(worktree, "handoffs", requirement_id)
-        # Handoffs normally reference a task instead of requirement directly.
         task_ids = {task.get("id") for task in tasks}
+        handoffs: list[dict[str, Any]] = []
         if task_ids:
             handoff_dir = worktree / ".agent" / "handoffs"
-            handoffs = []
             if handoff_dir.is_dir():
                 for path in sorted(handoff_dir.glob("*.yaml")):
                     if path.is_symlink() or not path.is_file():
                         continue
-                    value = yaml.safe_load(path.read_text(encoding="utf-8"))
+                    try:
+                        value = yaml.safe_load(path.read_text(encoding="utf-8"))
+                    except Exception:
+                        continue
                     if isinstance(value, dict) and value.get("task_id") in task_ids:
                         handoffs.append(value)
 
@@ -201,9 +224,9 @@ class PostMergeMemoryService:
 
         pr = None
         if create_pr:
-            if delivery is None:
-                raise ValueError("create_pr=True requires FeatureDeliveryService for the memory worktree")
-            delivered = delivery.deliver(
+            if github is None:
+                raise ValueError("create_pr=True requires a GitHubAppClient")
+            delivered = FeatureDeliveryService(worktree, github).deliver(
                 branch,
                 f"memory: record merged {requirement_id}",
                 f"Durable project memory derived only from merged evidence for {requirement_id}.",
