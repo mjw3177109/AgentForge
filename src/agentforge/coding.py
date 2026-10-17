@@ -207,6 +207,7 @@ class LiveCodingRuntime:
             if failure_feedback:
                 context += (
                     "\n\nREPAIR FEEDBACK FROM ORCHESTRATOR, REVIEWER, OR VERIFICATION. "
+                    "When this feedback contains command/test output, treat it as VERIFICATION FAILED. "
                     "Repair only the assigned task and stay inside its scope.\n"
                     + failure_feedback
                 )
