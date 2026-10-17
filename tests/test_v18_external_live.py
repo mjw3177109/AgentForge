@@ -8,7 +8,8 @@ from pathlib import Path
 
 import pytest
 
-from agentforge.contracts import RequirementDraft
+from agentforge.autonomous import AgentExecutionProfile, AutonomousDevelopmentPipeline
+from agentforge.contracts import RequirementDraft, TaskDraft, TaskScope
 from agentforge.execution_profiles import load_execution_profiles
 from agentforge.llm import OpenAICompatibleClient
 from agentforge.probe import probe_model
@@ -173,7 +174,10 @@ def test_execution_profiles_load_safe_commands(tmp_path: Path):
 allowed_verification_executables: [pytest, mvn]
 agents:
   backend:
-    context_paths: [server, .agent]
+    context_paths: [server/pom.xml, .agent/project.yaml]
+    read_scope: [server/**, .agent/**]
+    write_scope: [server/**]
+    deny_scope: [database/**, miniapp/**]
     verification:
       - argv: [mvn, test, -q]
         cwd: server
@@ -181,8 +185,37 @@ agents:
         encoding="utf-8",
     )
     loaded = load_execution_profiles(path)
+    profile = loaded.profiles["backend"]
     assert loaded.allowed_executables == {"pytest", "mvn"}
-    assert loaded.profiles["backend"].verification[0].argv == ["mvn", "test", "-q"]
+    assert profile.verification[0].argv == ["mvn", "test", "-q"]
+    assert profile.read_scope == ["server/**", ".agent/**"]
+    assert profile.write_scope == ["server/**"]
+    assert profile.deny_scope == ["database/**", "miniapp/**"]
+
+
+def test_execution_profile_blocks_planner_scope_expansion():
+    profile = AgentExecutionProfile(
+        context_paths=[],
+        read_scope=["server/**"],
+        write_scope=["server/**"],
+        deny_scope=["database/**"],
+    )
+    task = TaskDraft(
+        id="TASK-980101",
+        requirement_ids=["REQ-980001"],
+        adr_ids=["ADR-980001"],
+        assigned_agent="backend",
+        dependencies=[],
+        scope=TaskScope(
+            read=["server/**"],
+            write=["**"],
+            deny=["database/**"],
+        ),
+        acceptance=["backend change verified"],
+        verification=[],
+    )
+    with pytest.raises(ValueError, match="expanded write scope"):
+        AutonomousDevelopmentPipeline._validate_task_profile_scope(task, profile)
 
 
 def test_external_workflow_exists():
