@@ -1,0 +1,22 @@
+handoff_id: HO-001003
+task_id: TASK-001003
+source_agent: miniapp
+changed_files:
+  - miniapp/app.json
+  - miniapp/pages/index/index.js
+  - miniapp/pages/index/index.wxml
+  - miniapp/pages/product-detail/index.js
+  - miniapp/pages/product-detail/index.wxml
+  - miniapp/pages/product-detail/index.wxss
+  - miniapp/pages/favorites/index.js
+  - miniapp/pages/favorites/index.wxml
+  - miniapp/pages/favorites/index.wxss
+contracts_created_or_changed: [API-FAVORITE-001]
+tests:
+  state: PASS
+  github_actions_run: 39015098655
+  gate: miniapp-static
+warnings:
+  - Requires the WeChat login filter/session flow to populate authenticated user context before production use.
+next_tasks: [TASK-001004]
+evidence: [REQ-000201, ADR-000201, API-FAVORITE-001]

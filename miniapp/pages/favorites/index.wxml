@@ -1,0 +1,7 @@
+<view class="page">
+  <view class="title">我的收藏</view>
+  <view wx:if="{{!productIds.length}}">暂无收藏</view>
+  <block wx:for="{{productIds}}" wx:key="*this">
+    <view class="card" data-id="{{item}}" bindtap="openProduct">商品 #{{item}}</view>
+  </block>
+</view>

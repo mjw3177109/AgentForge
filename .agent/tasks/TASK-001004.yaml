@@ -1,0 +1,14 @@
+id: TASK-001004
+requirement_ids: [REQ-000201]
+adr_ids: [ADR-000201]
+assigned_agent: test
+dependencies: [TASK-001002, TASK-001003]
+scope:
+  read: ["**"]
+  write: ["server/src/test/**", "scripts/**"]
+  deny: [".agent/requirements/**"]
+acceptance:
+  - backend unit tests cover authenticated user propagation
+  - all repository CI gates pass
+verification: [core-tests, shop-backend, admin-build, miniapp-static]
+status: DONE

@@ -1,0 +1,15 @@
+id: TASK-001003
+requirement_ids: [REQ-000201]
+adr_ids: [ADR-000201]
+assigned_agent: miniapp
+dependencies: [TASK-001002]
+scope:
+  read: [".agent/**", "miniapp/**"]
+  write: ["miniapp/**"]
+  deny: ["server/**", "admin-web/**"]
+acceptance:
+  - 商品详情页能查询收藏状态
+  - 商品详情页能收藏和取消收藏
+  - 收藏列表页能读取收藏商品 ID
+verification: [miniapp-static]
+status: DONE

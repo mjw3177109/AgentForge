@@ -1,0 +1,16 @@
+id: TASK-001005
+requirement_ids: [REQ-000201]
+adr_ids: [ADR-000201]
+assigned_agent: reviewer
+dependencies: [TASK-001004]
+scope:
+  read: ["**"]
+  write: []
+  deny: []
+acceptance:
+  - implementation stays inside REQ-000201 scope
+  - backend references FACT-AUTH-001 behavior
+  - admin-web is unchanged by the feature
+  - all CI gates pass
+verification: [review, ci]
+status: DONE

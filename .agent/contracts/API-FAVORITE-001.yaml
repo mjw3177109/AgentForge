@@ -1,0 +1,20 @@
+id: API-FAVORITE-001
+type: API
+status: ACTIVE
+authentication: FACT-AUTH-001
+endpoints:
+  - method: POST
+    path: /api/favorites/{productId}
+    response: FavoriteStatus
+  - method: DELETE
+    path: /api/favorites/{productId}
+    response: FavoriteStatus
+  - method: GET
+    path: /api/favorites
+    response: ProductIdList
+  - method: GET
+    path: /api/products/{productId}/favorite-status
+    response: FavoriteStatus
+forbidden_inputs:
+  - X-User-Id
+  - userId query parameter used as authentication

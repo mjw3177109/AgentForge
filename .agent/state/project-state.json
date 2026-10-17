@@ -1,7 +1,8 @@
 {
   "project_id": "SHOP001",
-  "workflow_state": "READY",
-  "active_requirement": null,
+  "workflow_state": "PR_READY",
+  "active_requirement": "REQ-000201",
   "active_tasks": [],
+  "completed_tasks": ["TASK-001001", "TASK-001002", "TASK-001003", "TASK-001004", "TASK-001005"],
   "blocked_tasks": []
 }
