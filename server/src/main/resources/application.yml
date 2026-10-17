@@ -1,0 +1,19 @@
+spring:
+  datasource:
+    url: ${MYSQL_URL:jdbc:mysql://127.0.0.1:3306/agentforge_shop?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${MYSQL_USER:root}
+    password: ${MYSQL_PASSWORD:root}
+  redis:
+    host: ${REDIS_HOST:127.0.0.1}
+    port: ${REDIS_PORT:6379}
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+shop:
+  wechat-pay:
+    merchant-id: ${WECHAT_PAY_MCH_ID:}
+    app-id: ${WECHAT_APP_ID:}
+    api-v3-key: ${WECHAT_PAY_API_V3_KEY:}
+    private-key-path: ${WECHAT_PAY_PRIVATE_KEY_PATH:}
+    merchant-serial-number: ${WECHAT_PAY_MERCHANT_SERIAL:}
+    notify-url: ${WECHAT_PAY_NOTIFY_URL:}
