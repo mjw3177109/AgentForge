@@ -1,0 +1,20 @@
+id: ADR-000500
+requirement_ids:
+  - REQ-AGENTFORGE-V16
+decision:
+  pipeline:
+    mode: autonomous_request_to_pr
+    human_merge_required: true
+  execution:
+    planner_commands_executable: false
+    verification_source: orchestrator_agent_profiles
+  git:
+    feature_branch_required: true
+    force_push: false
+  reviewer:
+    write_access: false
+  publishing:
+    pull_request_only: true
+    auto_merge: false
+evidence:
+  - REQ-AGENTFORGE-V16
