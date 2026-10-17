@@ -1,0 +1,18 @@
+id: ADR-AUTH-001
+title: CurrentUser server-side resolution contract
+status: ACCEPTED
+requirement_ids: []
+context: Controllers need an authenticated user contract before business agents can safely implement user-scoped features.
+decision:
+  controller_contract: CurrentUser method parameter
+  source: request attribute agentforge.auth.userId
+  writer: upstream WeChat authentication filter
+  forbidden:
+    - X-User-Id
+    - client supplied user id trusted as authentication
+consequences:
+  - Business controllers do not parse user identity headers.
+  - Missing authentication context returns HTTP 401.
+  - WeChat login implementation must set the approved request attribute after token/session validation.
+evidence:
+  - FACT-AUTH-001
