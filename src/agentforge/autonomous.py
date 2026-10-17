@@ -5,6 +5,7 @@ import re
 import subprocess
 import urllib.error
 import urllib.request
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Literal
 
@@ -249,29 +250,53 @@ class AutonomousDevelopmentPipeline:
         return (
             "assigned_agent MUST be one of the exact profile names below. "
             "Prefer exactly one task per needed execution agent so each task can pass that agent's complete verification gate. "
-            "If a profile declares read_scope/write_scope/deny_scope, task scope entries MUST be chosen only from those exact lists; "
-            "do not invent broader globs or semantic scope labels.\n"
+            "For read_scope/write_scope, a task may use an exact profile glob or a concrete repository path contained by that glob, "
+            "but MUST NOT invent a broader or different glob. Profile deny_scope entries are mandatory and may only be supplemented. "
+            "Do not use semantic scope labels.\n"
             + json.dumps(payload, ensure_ascii=False, indent=2)
         )
 
     @staticmethod
-    def _validate_task_profile_scope(task: TaskDraft, profile: AgentExecutionProfile) -> None:
+    def _scope_entry_within_ceiling(entry: str, ceilings: list[str]) -> bool:
+        if entry in ceilings:
+            return True
+        if any(char in entry for char in "*?["):
+            return False
+        return any(fnmatchcase(entry, ceiling) for ceiling in ceilings)
+
+    @classmethod
+    def _validate_task_profile_scope(cls, task: TaskDraft, profile: AgentExecutionProfile) -> None:
         for field_name, task_values, allowed_values in (
             ("read", task.scope.read, profile.read_scope),
             ("write", task.scope.write, profile.write_scope),
-            ("deny", task.scope.deny, profile.deny_scope),
         ):
-            if allowed_values and not set(task_values).issubset(set(allowed_values)):
-                extras = sorted(set(task_values) - set(allowed_values))
-                raise ValueError(
-                    f"{task.id} expanded {field_name} scope beyond execution profile: {extras}"
+            if allowed_values:
+                extras = sorted(
+                    value for value in task_values
+                    if not cls._scope_entry_within_ceiling(value, allowed_values)
                 )
+                if extras:
+                    raise ValueError(
+                        f"{task.id} expanded {field_name} scope beyond execution profile: {extras}"
+                    )
         if profile.write_scope and not task.scope.write:
             raise ValueError(f"{task.id} has no write scope although its execution profile is writable")
-        if profile.read_scope:
-            policy = PolicyEngine(read=task.scope.read, write=task.scope.write, deny=task.scope.deny)
-            for context_path in profile.context_paths:
-                policy.require_read(context_path)
+
+        for context_path in profile.context_paths:
+            if profile.read_scope and not cls._scope_entry_within_ceiling(context_path, profile.read_scope):
+                raise ValueError(
+                    f"Execution profile context path is outside its own read ceiling: {context_path}"
+                )
+            if context_path not in task.scope.read:
+                task.scope.read.append(context_path)
+
+        for denied in profile.deny_scope:
+            if denied not in task.scope.deny:
+                task.scope.deny.append(denied)
+
+        policy = PolicyEngine(read=task.scope.read, write=task.scope.write, deny=task.scope.deny)
+        for context_path in profile.context_paths:
+            policy.require_read(context_path)
 
     def run(
         self,
