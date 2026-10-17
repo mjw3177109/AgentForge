@@ -20,6 +20,13 @@ class LoadedExecutionProfiles:
     allowed_executables: set[str]
 
 
+def _string_list(raw: dict, key: str, agent: str) -> list[str]:
+    value = raw.get(key, [])
+    if not isinstance(value, list) or not all(isinstance(item, str) and item.strip() for item in value):
+        raise ValueError(f"{agent}.{key} must be a list of non-empty strings")
+    return value
+
+
 def load_execution_profiles(path: Path) -> LoadedExecutionProfiles:
     data = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
@@ -40,10 +47,11 @@ def load_execution_profiles(path: Path) -> LoadedExecutionProfiles:
     for agent, raw in raw_agents.items():
         if not isinstance(agent, str) or not isinstance(raw, dict):
             raise ValueError("Each agent profile must be a mapping")
-        context_paths = raw.get("context_paths", [])
+        context_paths = _string_list(raw, "context_paths", agent)
+        read_scope = _string_list(raw, "read_scope", agent)
+        write_scope = _string_list(raw, "write_scope", agent)
+        deny_scope = _string_list(raw, "deny_scope", agent)
         raw_verification = raw.get("verification", [])
-        if not isinstance(context_paths, list) or not all(isinstance(p, str) for p in context_paths):
-            raise ValueError(f"{agent}.context_paths must be a list of paths")
         if not isinstance(raw_verification, list):
             raise ValueError(f"{agent}.verification must be a list")
 
@@ -62,6 +70,9 @@ def load_execution_profiles(path: Path) -> LoadedExecutionProfiles:
         profiles[agent] = AgentExecutionProfile(
             context_paths=context_paths,
             verification=specs,
+            read_scope=read_scope,
+            write_scope=write_scope,
+            deny_scope=deny_scope,
         )
 
     return LoadedExecutionProfiles(profiles=profiles, allowed_executables=allowed_set)
