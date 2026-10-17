@@ -40,7 +40,7 @@ def _schema_prompt(user: str, schema: type[BaseModel]) -> str:
 def _retry_feedback(exc: Exception) -> str:
     if isinstance(exc, ValidationError):
         payload = exc.errors(include_url=False, include_input=False)
-        return json.dumps(payload, ensure_ascii=False)[:3000]
+        return json.dumps(payload, ensure_ascii=False, default=str)[:3000]
     if isinstance(exc, json.JSONDecodeError):
         return "The previous response was not valid JSON."
     return "The previous response could not be accepted. Return a fresh response that follows the JSON Schema exactly."
