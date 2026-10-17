@@ -1,0 +1,12 @@
+handoff_id: HO-001001
+task_id: TASK-001001
+source_agent: database
+changed_files:
+  - server/src/main/resources/db/migration/V2__product_favorite.sql
+contracts_created_or_changed:
+  - DB-FAVORITE-001
+tests:
+  state: pending_ci
+warnings: []
+next_tasks: [TASK-001002]
+evidence: [REQ-000201, ADR-000201, DB-FAVORITE-001]

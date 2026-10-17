@@ -1,0 +1,16 @@
+id: TASK-001002
+requirement_ids: [REQ-000201]
+adr_ids: [ADR-000201]
+assigned_agent: backend
+dependencies: [TASK-001001]
+scope:
+  read: [".agent/**", "server/**"]
+  write: ["server/src/main/java/**", "server/src/test/**"]
+  deny: [".agent/requirements/**", "miniapp/**", "admin-web/**"]
+acceptance:
+  - API matches API-FAVORITE-001
+  - CurrentUser is used for identity
+  - no X-User-Id implementation exists
+  - duplicate favorite is idempotent
+verification: [shop-backend]
+status: VERIFYING

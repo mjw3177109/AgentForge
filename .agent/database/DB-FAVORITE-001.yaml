@@ -1,0 +1,13 @@
+id: DB-FAVORITE-001
+type: DATABASE
+status: ACTIVE
+table: user_product_favorite
+columns:
+  id: BIGINT AUTO_INCREMENT PRIMARY KEY
+  user_id: BIGINT NOT NULL
+  product_id: BIGINT NOT NULL
+  created_at: TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+constraints:
+  - UNIQUE(user_id, product_id)
+  - FOREIGN KEY(user_id) REFERENCES shop_user(id)
+  - FOREIGN KEY(product_id) REFERENCES product(id)

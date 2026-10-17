@@ -1,0 +1,7 @@
+id: RULE-FAVORITE-001
+type: BUSINESS_RULE
+status: ACTIVE
+statement: 同一用户与同一商品只能存在一条收藏记录，重复收藏必须保持幂等。
+source:
+  - REQ-000201
+  - ADR-000201

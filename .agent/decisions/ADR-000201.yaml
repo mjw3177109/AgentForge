@@ -1,0 +1,35 @@
+id: ADR-000201
+title: 商品收藏数据模型与接口
+status: ACCEPTED
+requirement_ids:
+  - REQ-000201
+context: 商品收藏需要跨数据库、Spring Boot 和微信小程序实现，同时必须复用现有认证事实。
+decision:
+  authentication:
+    fact: FACT-AUTH-001
+    controller_parameter: CurrentUser
+  database:
+    fact: DB-FAVORITE-001
+    table: user_product_favorite
+    unique: [user_id, product_id]
+  api:
+    contract: API-FAVORITE-001
+    endpoints:
+      - "POST /api/favorites/{productId}"
+      - "DELETE /api/favorites/{productId}"
+      - "GET /api/favorites"
+      - "GET /api/products/{productId}/favorite-status"
+  miniapp:
+    pages:
+      - pages/product-detail/index
+      - pages/favorites/index
+  admin:
+    change_required: false
+consequences:
+  - Database Agent creates a Flyway migration.
+  - Backend Agent may only write server scope.
+  - MiniApp Agent consumes API-FAVORITE-001 and may not change backend contracts.
+  - Admin Agent is skipped because admin is explicitly out of scope.
+evidence:
+  - REQ-000201
+  - FACT-AUTH-001

@@ -1,0 +1,15 @@
+id: TASK-001001
+requirement_ids: [REQ-000201]
+adr_ids: [ADR-000201]
+assigned_agent: database
+dependencies: []
+scope:
+  read: [".agent/**", "server/src/main/resources/db/**"]
+  write: ["server/src/main/resources/db/**"]
+  deny: ["server/src/main/java/**", "miniapp/**", "admin-web/**"]
+acceptance:
+  - user_product_favorite migration exists
+  - UNIQUE(user_id, product_id) exists
+  - user/product foreign keys exist
+verification: [shop-backend]
+status: VERIFYING

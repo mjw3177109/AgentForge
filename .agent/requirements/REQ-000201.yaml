@@ -1,0 +1,27 @@
+id: REQ-000201
+title: 商品收藏
+status: IMPLEMENTING
+actors:
+  - CUSTOMER
+modules:
+  - product
+  - favorite
+business_rules:
+  - 用户可以收藏商品
+  - 用户可以取消收藏
+  - 同一用户与商品不能产生重复收藏
+  - 收藏属于当前认证用户，客户端不能指定其他 userId
+acceptance:
+  - 商品详情页能读取当前商品收藏状态
+  - 用户可以收藏和取消收藏商品
+  - 个人收藏页可以读取当前用户收藏的商品 ID 列表
+  - 重复收藏保持幂等，不产生重复记录
+  - 所有收藏接口使用 CurrentUser，不接受 X-User-Id 或客户端 userId 作为认证依据
+out_of_scope:
+  - 管理后台收藏管理
+  - 收藏夹分类
+  - 收藏提醒
+  - 收藏统计报表
+evidence:
+  - FACT-AUTH-001
+created_at: "2026-10-17T07:49:00Z"
