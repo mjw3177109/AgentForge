@@ -1,0 +1,15 @@
+id: TASK-001001
+requirement_ids: [REQ-000201]
+adr_ids: [ADR-000201]
+assigned_agent: database
+dependencies: []
+scope:
+  read: ["templates/wechat-shop/.agent/**", "templates/wechat-shop/database/**"]
+  write: ["templates/wechat-shop/database/**"]
+  deny: ["templates/wechat-shop/server/**", "templates/wechat-shop/miniapp/**"]
+acceptance:
+  - user_product_favorite migration exists
+  - unique(user_id, product_id) exists
+verification:
+  - migration-review
+status: DONE

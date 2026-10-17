@@ -1,0 +1,16 @@
+id: TASK-001002
+requirement_ids: [REQ-000201]
+adr_ids: [ADR-000201]
+assigned_agent: backend
+dependencies: [TASK-001001]
+scope:
+  read: ["templates/wechat-shop/.agent/**", "templates/wechat-shop/database/**", "templates/wechat-shop/server/**"]
+  write: ["templates/wechat-shop/server/**"]
+  deny: ["templates/wechat-shop/.agent/requirements/**", "templates/wechat-shop/miniapp/**", "templates/wechat-shop/admin-web/**"]
+acceptance:
+  - API 与 ADR-000201 一致
+  - 认证用户来自 FACT-AUTH-001
+  - 重复收藏保持幂等
+verification:
+  - maven-test
+status: VERIFYING
