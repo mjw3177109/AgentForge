@@ -1,0 +1,117 @@
+allowed_verification_executables:
+  - mysql
+  - redis-cli
+  - mvn
+  - node
+  - npm
+agents:
+  database:
+    context_paths:
+      - database/README.md
+      - verification/database-contract.test.js
+      - .agent/project.yaml
+      - .agent/contracts/DB-POINTS-980100.yaml
+      - .agent/contracts/API-POINTS-980100.yaml
+    read_scope:
+      - database/**
+      - verification/**
+      - .agent/**
+    write_scope:
+      - database/migrations/V980100__points.sql
+    deny_scope:
+      - server/**
+      - miniapp/**
+      - admin-web/**
+    verification:
+      - argv: [node, --test, verification/database-contract.test.js]
+        cwd: .
+        timeout_seconds: 60
+      - argv:
+          - mysql
+          - --protocol=TCP
+          - -h127.0.0.1
+          - -P3306
+          - -uroot
+          - -proot
+          - -e
+          - "DROP DATABASE IF EXISTS agentforge; CREATE DATABASE agentforge; USE agentforge; source database/migrations/V980100__points.sql; ALTER TABLE points_account ENGINE=InnoDB; ALTER TABLE points_ledger ENGINE=InnoDB; SELECT TABLE_NAME, TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA='agentforge' AND TABLE_NAME IN ('points_account','points_ledger') ORDER BY TABLE_NAME; SHOW CREATE TABLE points_account; SHOW CREATE TABLE points_ledger;"
+        cwd: .
+        timeout_seconds: 60
+  backend:
+    context_paths:
+      - server/pom.xml
+      - server/src/main/java/com/agentforge/shop/auth/CurrentUserProvider.java
+      - server/src/test/java/com/agentforge/shop/points/VerifiedPointsContractTest.java
+      - database/migrations/V980100__points.sql
+      - verification/backend-contract.test.js
+      - .agent/project.yaml
+      - .agent/contracts/DB-POINTS-980100.yaml
+      - .agent/contracts/API-POINTS-980100.yaml
+    read_scope:
+      - server/**
+      - database/**
+      - verification/**
+      - .agent/**
+    write_scope:
+      - server/src/main/**
+    deny_scope:
+      - miniapp/**
+      - admin-web/**
+    verification:
+      - argv: [redis-cli, -h, 127.0.0.1, -p, "6379", PING]
+        cwd: .
+        timeout_seconds: 30
+      - argv: [node, --test, verification/backend-contract.test.js]
+        cwd: .
+        timeout_seconds: 60
+      - argv: [mvn, -q, -f, server/pom.xml, test]
+        cwd: .
+        timeout_seconds: 300
+  miniapp:
+    context_paths:
+      - miniapp/tests/points.test.js
+      - server/src/main/java/com/agentforge/shop/points/PointsController.java
+      - .agent/project.yaml
+      - .agent/contracts/API-POINTS-980100.yaml
+    read_scope:
+      - miniapp/**
+      - server/src/main/java/com/agentforge/shop/points/**
+      - .agent/**
+    write_scope:
+      - miniapp/src/api/points.js
+    deny_scope:
+      - database/**
+      - admin-web/**
+    verification:
+      - argv: [node, --test, miniapp/tests/points.test.js]
+        cwd: .
+        timeout_seconds: 60
+  admin:
+    context_paths:
+      - admin-web/package.json
+      - admin-web/index.html
+      - admin-web/vite.config.js
+      - admin-web/src/main.js
+      - admin-web/tests/points-ledger-contract.test.js
+      - server/src/main/java/com/agentforge/shop/points/PointsController.java
+      - .agent/project.yaml
+      - .agent/contracts/API-POINTS-980100.yaml
+    read_scope:
+      - admin-web/**
+      - server/src/main/java/com/agentforge/shop/points/**
+      - .agent/**
+    write_scope:
+      - admin-web/src/PointsLedgerView.vue
+    deny_scope:
+      - database/**
+      - miniapp/**
+    verification:
+      - argv: [node, --test, admin-web/tests/points-ledger-contract.test.js]
+        cwd: .
+        timeout_seconds: 60
+      - argv: [npm, install, --no-audit, --no-fund]
+        cwd: admin-web
+        timeout_seconds: 300
+      - argv: [npm, run, build]
+        cwd: admin-web
+        timeout_seconds: 300

@@ -6,6 +6,7 @@ from agentforge.errors import PolicyDenied
 
 _DRIVE_RE = re.compile(r"^[A-Za-z]:/")
 
+
 def norm(path: str) -> str:
     raw = str(path).replace("\\", "/").strip()
     if not raw:
@@ -19,14 +20,21 @@ def norm(path: str) -> str:
         normalized = normalized[2:]
     return str(PurePosixPath(normalized))
 
+
 def matches(path: str, pattern: str) -> bool:
+    raw_pattern = str(pattern).replace("\\", "/").strip()
+    directory_scope = raw_pattern.endswith("/") and raw_pattern != "/"
     try:
-        path, pattern = norm(path), norm(pattern)
+        path = norm(path)
+        pattern = norm(raw_pattern)
     except PolicyDenied:
         return False
     if pattern == "**":
         return True
+    if directory_scope:
+        return path == pattern or fnmatch.fnmatchcase(path, pattern + "/**")
     return fnmatch.fnmatchcase(path, pattern) or fnmatch.fnmatchcase(path + "/", pattern)
+
 
 class PolicyEngine:
     def __init__(self, read=None, write=None, deny=None):

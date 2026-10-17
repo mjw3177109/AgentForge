@@ -5,6 +5,7 @@ import re
 import subprocess
 import urllib.error
 import urllib.request
+from fnmatch import fnmatchcase
 from pathlib import Path
 from typing import Literal
 
@@ -13,13 +14,21 @@ from pydantic import BaseModel, Field, model_validator
 from agentforge.coding import CodingResult, LiveCodingRuntime, VerificationSpec
 from agentforge.contracts import ArchitectureDraft, RequirementDraft, TaskBundle, TaskDraft
 from agentforge.evidence import EvidenceIndex
+from agentforge.errors import EvidenceError, PolicyDenied
 from agentforge.live import LivePlanningPipeline
 from agentforge.llm import OpenAICompatibleClient
+from agentforge.policy import PolicyEngine, norm
+
+
+_EVIDENCE_ID_RE = re.compile(r"^(REQ|ADR|TASK|FACT|API|DB|RULE|SEC|MEM)-[A-Za-z0-9._:-]+$")
 
 
 class AgentExecutionProfile(BaseModel):
     context_paths: list[str] = Field(default_factory=list)
     verification: list[VerificationSpec] = Field(default_factory=list)
+    read_scope: list[str] = Field(default_factory=list)
+    write_scope: list[str] = Field(default_factory=list)
+    deny_scope: list[str] = Field(default_factory=list)
 
 
 class ReviewDecision(BaseModel):
@@ -29,8 +38,13 @@ class ReviewDecision(BaseModel):
 
     @model_validator(mode="after")
     def validate_review(self):
+        invalid = [item for item in self.evidence if not _EVIDENCE_ID_RE.fullmatch(item)]
+        if invalid:
+            raise ValueError("Reviewer evidence must contain repository evidence IDs, never prose or file paths")
         if self.status == "APPROVE" and not self.evidence:
             raise ValueError("APPROVE requires evidence")
+        if self.status == "REQUEST_CHANGES" and not any(item.startswith("TASK-") for item in self.evidence):
+            raise ValueError("REQUEST_CHANGES requires at least one affected TASK evidence id")
         return self
 
 
@@ -221,12 +235,203 @@ class AutonomousDevelopmentPipeline:
         profiles: dict[str, AgentExecutionProfile],
         allowed_verification_executables: set[str],
         max_coding_attempts: int = 2,
+        max_review_rounds: int = 2,
     ):
         self.client = client
         self.repo_root = repo_root.resolve()
         self.profiles = profiles
         self.allowed_verification_executables = set(allowed_verification_executables)
         self.max_coding_attempts = max_coding_attempts
+        self.max_review_rounds = max_review_rounds
+
+    def _project_context(self) -> str:
+        path = self.repo_root / ".agent/project.yaml"
+        if not path.is_file():
+            return ""
+        return path.read_text(encoding="utf-8", errors="replace")[:20000]
+
+    def _review_context(self, max_chars: int = 40000) -> str:
+        """Build a read-only reviewer bundle from declared verified repository context."""
+        candidates: list[str] = [".agent/project.yaml"]
+        contracts_dir = self.repo_root / ".agent/contracts"
+        if contracts_dir.is_dir():
+            for path in sorted(contracts_dir.rglob("*")):
+                if path.is_file() and not path.is_symlink():
+                    candidates.append(path.relative_to(self.repo_root).as_posix())
+        for profile in self.profiles.values():
+            candidates.extend(profile.context_paths)
+
+        chunks: list[str] = []
+        seen: set[str] = set()
+        used = 0
+        for raw in candidates:
+            rel = str(raw).replace("\\", "/").strip()
+            if not rel or rel in seen or any(char in rel for char in "*?["):
+                continue
+            seen.add(rel)
+            path = (self.repo_root / rel).resolve()
+            try:
+                path.relative_to(self.repo_root)
+            except ValueError:
+                continue
+            if not path.is_file() or path.is_symlink():
+                continue
+            body = path.read_text(encoding="utf-8", errors="replace")
+            block = f"--- {rel} ---\n{body}\n"
+            remaining = max_chars - used
+            if remaining <= 0:
+                break
+            if len(block) > remaining:
+                block = block[:remaining]
+            chunks.append(block)
+            used += len(block)
+        return "\n".join(chunks)
+
+    def _task_constraints(self) -> str:
+        payload: dict[str, dict[str, list[str]]] = {}
+        for name, profile in sorted(self.profiles.items()):
+            payload[name] = {
+                "read_scope": profile.read_scope,
+                "write_scope": profile.write_scope,
+                "deny_scope": profile.deny_scope,
+            }
+        return (
+            "assigned_agent MUST be one of the exact profile names below. "
+            "Prefer exactly one task per needed execution agent so each task can pass that agent's complete verification gate. "
+            "For read_scope/write_scope, a task may use an exact profile glob or a concrete repository path contained by that glob, "
+            "but MUST NOT invent a broader or different glob. Profile deny_scope entries are mandatory and may only be supplemented. "
+            "Do not use semantic scope labels.\n"
+            + json.dumps(payload, ensure_ascii=False, indent=2)
+        )
+
+    @staticmethod
+    def _scope_entry_within_ceiling(entry: str, ceilings: list[str]) -> bool:
+        if entry in ceilings:
+            return True
+        if any(char in entry for char in "*?["):
+            return False
+        return any(fnmatchcase(entry, ceiling) for ceiling in ceilings)
+
+    @classmethod
+    def _validate_task_profile_scope(cls, task: TaskDraft, profile: AgentExecutionProfile) -> None:
+        for field_name, task_values, allowed_values in (
+            ("read", task.scope.read, profile.read_scope),
+            ("write", task.scope.write, profile.write_scope),
+        ):
+            if allowed_values:
+                extras = sorted(
+                    value for value in task_values
+                    if not cls._scope_entry_within_ceiling(value, allowed_values)
+                )
+                if extras:
+                    raise ValueError(
+                        f"{task.id} expanded {field_name} scope beyond execution profile: {extras}"
+                    )
+        if profile.write_scope and not task.scope.write:
+            raise ValueError(f"{task.id} has no write scope although its execution profile is writable")
+
+        for context_path in profile.context_paths:
+            if profile.read_scope and not cls._scope_entry_within_ceiling(context_path, profile.read_scope):
+                raise ValueError(
+                    f"Execution profile context path is outside its own read ceiling: {context_path}"
+                )
+            if context_path not in task.scope.read:
+                task.scope.read.append(context_path)
+
+        for denied in profile.deny_scope:
+            if denied not in task.scope.deny:
+                task.scope.deny.append(denied)
+
+        policy = PolicyEngine(read=task.scope.read, write=task.scope.write, deny=task.scope.deny)
+        for context_path in profile.context_paths:
+            policy.require_read(context_path)
+
+    def _repair_context_paths(self, task: TaskDraft, profile: AgentExecutionProfile) -> list[str]:
+        paths = list(profile.context_paths)
+        policy = PolicyEngine(read=task.scope.read, write=task.scope.write, deny=task.scope.deny)
+        candidates: set[str] = set()
+        for raw in task.scope.write:
+            clean = str(raw).replace("\\", "/").strip()
+            if clean.endswith("/"):
+                root = self.repo_root / norm(clean)
+                if root.is_dir():
+                    for path in root.rglob("*"):
+                        if path.is_file() and not path.is_symlink():
+                            candidates.add(path.relative_to(self.repo_root).as_posix())
+            elif any(char in clean for char in "*?["):
+                for path in self.repo_root.glob(clean):
+                    if path.is_file() and not path.is_symlink():
+                        candidates.add(path.relative_to(self.repo_root).as_posix())
+            else:
+                path = self.repo_root / norm(clean)
+                if path.is_file() and not path.is_symlink():
+                    candidates.add(path.relative_to(self.repo_root).as_posix())
+
+        for rel in sorted(candidates):
+            try:
+                policy.require_read(rel)
+            except PolicyDenied:
+                continue
+            if rel not in paths:
+                paths.append(rel)
+            if len(paths) >= 40:
+                break
+        return paths
+
+    def _review(
+        self,
+        *,
+        plan,
+        task_runs: list[TaskRunRecord],
+        base_branch: str,
+        git: GitWorkspace,
+    ) -> ReviewDecision:
+        evidence_index = EvidenceIndex(self.repo_root).build()
+        evidence_ids = sorted(evidence_index.ids)
+        prompt = (
+            f"REQUIREMENT:\n{plan.requirement.model_dump_json()}\n\n"
+            f"ARCHITECTURE:\n{plan.architecture.model_dump_json()}\n\n"
+            f"TASKS:\n{plan.tasks.model_dump_json()}\n\n"
+            f"TASK RUNS (orchestrator-recorded verification status):\n"
+            f"{json.dumps([record.model_dump() for record in task_runs], ensure_ascii=False, indent=2)}\n\n"
+            f"VERIFIED REVIEW CONTEXT (project facts, contracts, and declared agent context):\n{self._review_context()}\n\n"
+            "AVAILABLE EVIDENCE IDS:\n"
+            f"{json.dumps(evidence_ids, ensure_ascii=False)}\n\n"
+            "Put all criticism and requested changes in summary. evidence must contain ONLY exact IDs from AVAILABLE EVIDENCE IDS. "
+            "For REQUEST_CHANGES, include every affected TASK id in evidence so the orchestrator can route repairs. "
+            "Evaluate all currently identifiable material defects across all tasks in this review; do not intentionally defer known defects to later review cycles. "
+            "Requested changes must stay within the requirement, ADR, VERIFIED contracts, and VERIFIED project context; do not invent endpoints, identity sources, or integration facts. "
+            "REQUEST_CHANGES has a strict burden of proof: every requested change must be directly supported by REQUIREMENT, ARCHITECTURE, VERIFIED REVIEW CONTEXT, TASK RUNS, or DIFF. "
+            "Do not use hypothetical or conditional concerns (for example may, might, could, if, perhaps, possibly) as rejection reasons. "
+            "Do not require an 'existing' integration, auth client, privileged scope, event handler, endpoint, or other project component unless it is explicitly present in VERIFIED REVIEW CONTEXT or DIFF. "
+            "When a VERIFIED contract defines an internal service seam for a trusted external flow but VERIFIED REVIEW CONTEXT contains no integration component, review the seam itself and do not invent an integration target. "
+            "When a VERIFIED contract names the endpoint or scope a consumer must use, do not infer a broader privileged endpoint or scope that the contract does not define. "
+            "Do not use file paths or prose in evidence. Existing unchanged files may not appear in DIFF; use VERIFIED REVIEW CONTEXT before claiming an unchanged project component is absent.\n\n"
+            f"DIFF:\n{git.diff_from(base_branch)}"
+        )
+        for attempt in range(2):
+            review = self.client.complete_model(
+                system=(
+                    "You are the read-only AgentForge reviewer. Return JSON only. "
+                    "Do not propose file writes. APPROVE only if the diff is within the requirement/ADR/task scope, "
+                    "cross-stack contracts are consistent, security/business rules are preserved, and all task verification passed. "
+                    "REQUEST_CHANGES must be routed through affected TASK evidence IDs."
+                ),
+                user=prompt,
+                schema=ReviewDecision,
+            )
+            try:
+                evidence_index.require(review.evidence)
+                return review
+            except EvidenceError as exc:
+                if attempt == 0:
+                    prompt += (
+                        "\n\nThe previous reviewer output used unknown evidence. Correct only the evidence field using exact AVAILABLE EVIDENCE IDS. "
+                        f"Validation error: {exc}"
+                    )
+                    continue
+                raise
+        raise RuntimeError("Reviewer did not return valid evidence")
 
     def run(
         self,
@@ -249,11 +454,19 @@ class AutonomousDevelopmentPipeline:
         git = GitWorkspace(self.repo_root)
         git.ensure_clean()
 
-        plan = LivePlanningPipeline(self.client).plan(request, requirement_id, adr_id)
+        plan = LivePlanningPipeline(self.client).plan(
+            request,
+            requirement_id,
+            adr_id,
+            project_context=self._project_context(),
+            task_constraints=self._task_constraints(),
+        )
         ordered_tasks = topological_tasks(plan.tasks)
+        task_by_id = {task.id: task for task in ordered_tasks}
         for task in ordered_tasks:
             if task.assigned_agent not in self.profiles:
                 raise ValueError(f"No execution profile for agent {task.assigned_agent}")
+            self._validate_task_profile_scope(task, self.profiles[task.assigned_agent])
 
         branch = feature_branch or f"feature/{plan.requirement.id}"
         git.create_feature_branch(branch, base_branch)
@@ -295,32 +508,127 @@ class AutonomousDevelopmentPipeline:
             record.commit = git.commit_all(f"feat({task.assigned_agent}): complete {task.id}")
             task_runs.append(record)
 
-        diff = git.diff_from(base_branch)
-        review = self.client.complete_model(
-            system=(
-                "You are the read-only AgentForge reviewer. Return JSON only. "
-                "Do not propose file writes. APPROVE only if the diff is within the requirement/ADR/task scope "
-                "and all task verification passed."
-            ),
-            user=(
-                f"REQUIREMENT:\n{plan.requirement.model_dump_json()}\n\n"
-                f"ARCHITECTURE:\n{plan.architecture.model_dump_json()}\n\n"
-                f"TASKS:\n{plan.tasks.model_dump_json()}\n\n"
-                f"DIFF:\n{diff}"
-            ),
-            schema=ReviewDecision,
-        )
-        EvidenceIndex(self.repo_root).build().require(review.evidence)
-        if review.status != "APPROVE":
-            return AutonomousResult(
-                status="BLOCKED" if review.status == "BLOCKED" else "REVIEW_CHANGES",
-                requirement_id=plan.requirement.id,
-                adr_id=plan.architecture.id,
-                feature_branch=branch,
+        review: ReviewDecision | None = None
+        review_cycle = 0
+        repair_counts = {task.id: 0 for task in ordered_tasks}
+        while True:
+            review = self._review(
+                plan=plan,
                 task_runs=task_runs,
-                review=review,
-                message=review.summary,
+                base_branch=base_branch,
+                git=git,
             )
+            if review.status == "APPROVE":
+                break
+            if review.status == "BLOCKED":
+                return AutonomousResult(
+                    status="BLOCKED",
+                    requirement_id=plan.requirement.id,
+                    adr_id=plan.architecture.id,
+                    feature_branch=branch,
+                    task_runs=task_runs,
+                    review=review,
+                    message=review.summary,
+                )
+            affected_ids = [item for item in review.evidence if item.startswith("TASK-")]
+            if not affected_ids:
+                return AutonomousResult(
+                    status="REVIEW_CHANGES",
+                    requirement_id=plan.requirement.id,
+                    adr_id=plan.architecture.id,
+                    feature_branch=branch,
+                    task_runs=task_runs,
+                    review=review,
+                    message="Reviewer requested changes without routable TASK evidence.",
+                )
+
+            repairable_ids = [
+                task_id
+                for task_id in affected_ids
+                if task_id in task_by_id and repair_counts[task_id] < self.max_review_rounds
+            ]
+            if not repairable_ids:
+                return AutonomousResult(
+                    status="REVIEW_CHANGES",
+                    requirement_id=plan.requirement.id,
+                    adr_id=plan.architecture.id,
+                    feature_branch=branch,
+                    task_runs=task_runs,
+                    review=review,
+                    message=(
+                        "Reviewer still requests changes after all affected tasks exhausted "
+                        f"their per-task repair budget: {review.summary}"
+                    ),
+                )
+
+            for task in ordered_tasks:
+                if task.id not in repairable_ids:
+                    continue
+                repair_attempt = repair_counts[task.id] + 1
+                profile = self.profiles[task.assigned_agent]
+                runtime = LiveCodingRuntime(
+                    self.client,
+                    self.repo_root,
+                    self.allowed_verification_executables,
+                    max_attempts=self.max_coding_attempts,
+                )
+                result = runtime.execute(
+                    task,
+                    context_paths=self._repair_context_paths(task, profile),
+                    verification=profile.verification,
+                    initial_feedback=(
+                        f"READ-ONLY REVIEWER REQUESTED CHANGES IN REVIEW CYCLE {review_cycle + 1}; "
+                        f"TASK REPAIR ATTEMPT {repair_attempt}/{self.max_review_rounds}:\n"
+                        f"{review.summary}\n\n"
+                        f"Repair only {task.id}. Do not change files outside this task's scope. "
+                        f"Act only on concrete reviewer findings that explicitly apply to {task.id}; ignore findings that name only other TASK ids. "
+                        "REQUIREMENT, ARCHITECTURE, VERIFIED contracts, and your readable VERIFIED project context outrank reviewer prose. "
+                        "Do not invent or assume missing integration, auth, client, endpoint, event, or privileged-scope components. "
+                        "If reviewer prose depends on a project component absent from your readable verified context, do not fabricate that component; fix the supported in-scope findings instead."
+                    ),
+                )
+                record = TaskRunRecord(
+                    task_id=task.id,
+                    agent=task.assigned_agent,
+                    status=result.status,
+                    attempts=result.attempts,
+                    message=(
+                        f"review repair round {review_cycle + 1}, task attempt "
+                        f"{repair_attempt}/{self.max_review_rounds}: {result.message}"
+                    ),
+                )
+                if result.status != "SUCCESS":
+                    task_runs.append(record)
+                    return AutonomousResult(
+                        status="BLOCKED" if result.status == "BLOCKED" else "FAILED",
+                        requirement_id=plan.requirement.id,
+                        adr_id=plan.architecture.id,
+                        feature_branch=branch,
+                        task_runs=task_runs,
+                        review=review,
+                        message=f"Reviewer repair for {task.id} did not complete successfully",
+                    )
+                if not git.has_changes():
+                    task_runs.append(record)
+                    return AutonomousResult(
+                        status="REVIEW_CHANGES",
+                        requirement_id=plan.requirement.id,
+                        adr_id=plan.architecture.id,
+                        feature_branch=branch,
+                        task_runs=task_runs,
+                        review=review,
+                        message=f"Reviewer requested changes for {task.id}, but repair produced no repository diff.",
+                    )
+                record.commit = git.commit_all(
+                    f"fix({task.assigned_agent}): review repair {task.id} attempt {repair_attempt}"
+                )
+                task_runs.append(record)
+                repair_counts[task.id] = repair_attempt
+
+            review_cycle += 1
+
+        if review is None or review.status != "APPROVE":
+            raise RuntimeError("Autonomous review loop ended without a decision")
 
         if push:
             git.push(remote, branch)

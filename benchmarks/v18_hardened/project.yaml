@@ -1,0 +1,49 @@
+id: PROJECT-V18-LIVE-WECHAT-SHOP
+name: v18-live-wechat-shop
+verified_facts:
+  backend:
+    path: server
+    framework: Spring Boot 2.7.18
+    java: 17
+    auth_provider: server/src/main/java/com/agentforge/shop/auth/CurrentUserProvider.java
+    auth_rule: CurrentUserProvider is the only allowed current-user source; do not invent X-User-Id or identity headers.
+  database:
+    engine: MySQL 8
+    migration_file: database/migrations/V980100__points.sql
+    account_table: points_account
+    ledger_table: points_ledger
+    source_of_truth: MySQL is authoritative for points account and ledger.
+    idempotency: points_ledger.business_no is globally unique; the same business_no may affect points at most once.
+  cache:
+    engine: Redis 7
+    rule: Redis may cache balances but is never the source of truth.
+  miniapp:
+    path: miniapp
+    runtime: Node CommonJS
+    required_file: miniapp/src/api/points.js
+  admin:
+    path: admin-web
+    framework: Vue3 + Vite
+    required_view: admin-web/src/PointsLedgerView.vue
+    entry: admin-web/src/main.js
+verified_contracts:
+  database: .agent/contracts/DB-POINTS-980100.yaml
+  api: .agent/contracts/API-POINTS-980100.yaml
+orchestration_constraints:
+  - database task must complete before backend task
+  - backend task must complete before miniapp and admin tasks
+business_rules:
+  earn: floor(paid_amount_yuan) points after payment succeeds
+  expiry: never
+  redeem_rate: 100 points = 1 yuan
+  max_order_discount: 20 percent of paid amount
+required_outputs:
+  - database/migrations/V980100__points.sql
+  - Spring Boot points domain/service/API under server/src/main/java/com/agentforge/shop/points/
+  - miniapp/src/api/points.js
+  - admin-web/src/PointsLedgerView.vue
+forbidden:
+  - production deployment
+  - automatic merge to main
+  - custom user identity headers
+  - public user-callable points earning endpoint

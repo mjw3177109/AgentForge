@@ -1,0 +1,15 @@
+id: DB-POINTS-980100
+status: VERIFIED
+database: MySQL 8
+migration: database/migrations/V980100__points.sql
+tables:
+  points_account:
+    required_columns: [user_id, balance_points, created_at, updated_at]
+    primary_key: user_id
+  points_ledger:
+    required_columns: [id, user_id, business_no, entry_type, points_delta, order_paid_amount_yuan, created_at]
+    unique: [business_no]
+rules:
+  - MySQL is the only fact source for balances and ledger entries.
+  - Redis is cache only.
+  - Do not create user_points_account or user_points_ledger aliases, views, or alternate tables.
