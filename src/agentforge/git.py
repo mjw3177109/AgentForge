@@ -64,6 +64,12 @@ class GitRepository:
             f"Unable to verify ancestry {ancestor} -> {descendant_ref}: {proc.stderr.strip()}"
         )
 
+    def show_file_at_ref(self, ref: str, path: str) -> str:
+        """Read one tracked UTF-8 text file from an immutable/ref snapshot."""
+        if path.startswith("/") or ".." in Path(path).parts or ":" in path:
+            raise GitError(f"Unsafe git object path: {path}")
+        return self._run("show", f"{ref}:{path}")
+
     def changed_files(self, cwd: Path | None = None) -> list[str]:
         out = self._run("status", "--porcelain", "-uall", cwd=cwd)
         files: list[str] = []
