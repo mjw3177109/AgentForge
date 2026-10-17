@@ -1,0 +1,14 @@
+id: ADR-000300
+title: Live LLM planning boundary
+status: ACCEPTED
+requirement_ids: []
+decision:
+  model_boundary: openai-compatible-http
+  model_permissions:
+    git: false
+    shell: false
+    filesystem_write: false
+  structured_outputs: [requirement, architecture, task_dag]
+  gates: [schema, traceability, scope, evidence, policy, verification]
+consequences:
+  - Live models can plan but cannot bypass deterministic gates.

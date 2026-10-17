@@ -2,9 +2,9 @@ name: AgentForge CI
 
 on:
   pull_request:
-    branches: [main]
-  push:
     branches: [main, "agentforge/**"]
+  push:
+    branches: [main, "agentforge/**", "feature/**"]
 
 permissions:
   contents: read
