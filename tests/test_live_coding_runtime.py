@@ -183,3 +183,17 @@ def test_verification_executable_is_allowlisted(tmp_path):
     runner = VerificationRunner(repo, allowed_executables={"python"})
     with pytest.raises(PolicyDenied):
         runner.run([VerificationSpec(argv=["bash", "-lc", "echo nope"])])
+
+
+def test_verification_side_effects_stay_in_disposable_copy(tmp_path):
+    repo, _ = make_repo(tmp_path)
+    runner = VerificationRunner(repo, allowed_executables={Path(sys.executable).name})
+    result = runner.run([
+        VerificationSpec(argv=[
+            sys.executable,
+            "-c",
+            "from pathlib import Path; Path('verification-side-effect.txt').write_text('sandbox only')",
+        ])
+    ])
+    assert result[0].success is True
+    assert not (repo / "verification-side-effect.txt").exists()
