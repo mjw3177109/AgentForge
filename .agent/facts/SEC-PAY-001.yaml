@@ -1,0 +1,6 @@
+id: SEC-PAY-001
+type: SECURITY
+status: ACTIVE
+statement: WeChat Pay uses API v3 official Java SDK; payment callbacks require signature verification and idempotent processing.
+source:
+  - .agent/constitution.md

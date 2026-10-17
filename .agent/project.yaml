@@ -1,0 +1,29 @@
+project:
+  id: SHOP001
+  name: agentforge-wechat-shop
+  version: "0.1.0"
+repository:
+  provider: github
+  default_branch: main
+stack:
+  miniapp:
+    framework: wechat-native
+  admin:
+    framework: vue3
+  backend:
+    framework: springboot
+    version: "2.7.18"
+    language: java17
+  database:
+    engine: mysql
+  cache:
+    engine: redis
+  payment:
+    provider: wechat-pay
+    api: v3
+rules:
+  direct_main_write: false
+  require_pr: true
+  require_ci: true
+  require_review: true
+  require_fact_reference: true
