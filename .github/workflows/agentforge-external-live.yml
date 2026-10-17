@@ -143,9 +143,9 @@ jobs:
         run: |
           mysql --protocol=TCP -h127.0.0.1 -P3306 -uroot -proot agentforge -e "SELECT 1;"
           redis-cli -h 127.0.0.1 -p 6379 PING
-      - name: Run real external-LLM autonomous benchmark
+      - name: Run hardened real external-LLM autonomous benchmark
         if: steps.llm.outputs.configured == 'true'
-        run: python scripts/run_v18_live_autonomous_benchmark.py
+        run: python scripts/run_v18_live_autonomous_benchmark_hardened.py
       - name: Autonomous benchmark not configured
         if: steps.llm.outputs.configured != 'true'
         run: echo "SKIPPED_REAL_AUTONOMOUS=true"

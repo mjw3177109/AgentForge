@@ -1,0 +1,31 @@
+id: API-POINTS-980100
+status: VERIFIED
+identity:
+  provider: com.agentforge.shop.auth.CurrentUserProvider
+  forbid_custom_identity_headers: true
+public_user_api:
+  balance:
+    method: GET
+    path: /api/points/balance
+  redeem_preview:
+    method: POST
+    path: /api/points/redeem-preview
+    json_body:
+      orderPaidAmountYuan: decimal
+  ledger:
+    method: GET
+    path: /api/points/ledger
+    query: [page, size]
+earning:
+  public_endpoint: forbidden
+  service_operation: earnAfterPayment
+  inputs: [businessNo, paidAmountYuan]
+  rule: only the trusted payment-success flow may invoke earning; a normal authenticated user must not be able to mint points.
+miniapp:
+  balance_path: /api/points/balance
+  redeem_preview_path: /api/points/redeem-preview
+  redeem_preview_transport: POST JSON body with orderPaidAmountYuan
+  custom_identity_headers: forbidden
+admin:
+  must_load_authoritative_balance: /api/points/balance
+  must_load_ledger: /api/points/ledger
