@@ -17,9 +17,17 @@ from agentforge.workspace import SafeWorkspace
 
 
 class FileOperation(BaseModel):
-    op: Literal["write_text"]
+    op: Literal["write_text", "delete_file"]
     path: str = Field(min_length=1)
-    content: str
+    content: str | None = None
+
+    @model_validator(mode="after")
+    def validate_operation(self):
+        if self.op == "write_text" and self.content is None:
+            raise ValueError("write_text operation requires content")
+        if self.op == "delete_file" and self.content not in {None, ""}:
+            raise ValueError("delete_file operation must not carry replacement content")
+        return self
 
 
 class AgentAction(BaseModel):
@@ -170,15 +178,49 @@ class LiveCodingRuntime:
             deny=task.scope.deny,
         )
 
+    def _protocol_context_paths(self, task: TaskDraft, policy: PolicyEngine) -> list[str]:
+        """Return authoritative AgentForge protocol files the task is already allowed to read.
+
+        This never widens task scope. A protocol file is included only when it exists and the
+        task's read/deny policy already permits it. This lets independent coding agents consume
+        the same REQ/ADR/TASK facts without bypassing execution-profile boundaries.
+        """
+        candidates = [".agent/project.yaml"]
+        candidates.extend(f".agent/requirements/{item}.yaml" for item in task.requirement_ids)
+        candidates.extend(f".agent/decisions/{item}.yaml" for item in task.adr_ids)
+        candidates.append(f".agent/tasks/{task.id}.yaml")
+        candidates.extend(f".agent/tasks/{item}.yaml" for item in task.dependencies)
+
+        allowed: list[str] = []
+        for rel in candidates:
+            path = self.repo_root / rel
+            if not path.is_file() or path.is_symlink():
+                continue
+            try:
+                policy.require_read(rel)
+            except PolicyDenied:
+                continue
+            if rel not in allowed:
+                allowed.append(rel)
+        return allowed
+
     def _apply(self, task: TaskDraft, action: AgentAction) -> list[str]:
         EvidenceIndex(self.repo_root).build().require(action.evidence)
         policy = self._policy(task)
         workspace = SafeWorkspace(self.repo_root, policy)
         for operation in action.operations:
+            if operation.op == "delete_file":
+                # Destructive changes require both read and write authority. This prevents an
+                # agent from blindly deleting a path that it was never allowed to inspect.
+                policy.require_read(operation.path)
             workspace.preflight_write(operation.path)
         changed: list[str] = []
         for operation in action.operations:
-            workspace.write_text(operation.path, operation.content)
+            if operation.op == "write_text":
+                assert operation.content is not None
+                workspace.write_text(operation.path, operation.content)
+            elif operation.op == "delete_file":
+                workspace.delete_file(operation.path)
             changed.append(norm(operation.path))
         return changed
 
@@ -192,11 +234,18 @@ class LiveCodingRuntime:
         policy = self._policy(task)
         builder = TaskContextBuilder(self.repo_root, policy)
         active_paths = list(context_paths)
+        for rel in self._protocol_context_paths(task, policy):
+            if rel not in active_paths:
+                active_paths.append(rel)
         actions: list[AgentAction] = []
         failure_feedback = initial_feedback
         latest_results: list[VerificationResult] = []
 
-        for attempt in range(1, self.max_attempts + 1):
+        # Reviewer/orchestrator-directed repair gets one extra bounded attempt. The same policy,
+        # evidence gate, verification allowlist, and disposable verification sandbox still apply.
+        attempt_limit = self.max_attempts + (1 if initial_feedback else 0)
+
+        for attempt in range(1, attempt_limit + 1):
             context = builder.build(task, active_paths)
             evidence_ids = sorted(EvidenceIndex(self.repo_root).build().ids)
             context += (
@@ -215,7 +264,10 @@ class LiveCodingRuntime:
                 system=(
                     "You are a constrained coding agent. Return only JSON matching AgentAction. "
                     "You have no shell, git, network, or direct filesystem authority. "
-                    "Only propose write_text operations inside the task write scope. "
+                    "Operations may be write_text or delete_file. Only propose operations inside the task write scope. "
+                    "Use delete_file only when an obsolete regular file is visible in context and deletion is required "
+                    "to remove a conflicting implementation; deletion also requires task read authority. "
+                    "Files under .agent are authoritative protocol facts when they are present in context. "
                     "Every successful action must cite repository evidence IDs exactly from AVAILABLE EVIDENCE IDS. "
                     "Never use file paths, prose, or invented identifiers as evidence."
                 ),
@@ -237,7 +289,7 @@ class LiveCodingRuntime:
                     f"ACTION REJECTED BEFORE ANY FILE WRITE: {type(exc).__name__}: {exc}. "
                     "Use only the exact AVAILABLE EVIDENCE IDS and only paths allowed by the task write scope."
                 )
-                if attempt < self.max_attempts:
+                if attempt < attempt_limit:
                     continue
                 return CodingResult(
                     status="FAILED",
@@ -262,12 +314,18 @@ class LiveCodingRuntime:
                 if not result.success
             )
 
+        failed_commands = [
+            f"{result.argv} (exit {result.returncode})"
+            for result in latest_results
+            if not result.success
+        ]
+        diagnostic = "; ".join(failed_commands) if failed_commands else "unknown verification failure"
         return CodingResult(
             status="FAILED",
-            attempts=self.max_attempts,
+            attempts=attempt_limit,
             actions=actions,
             verification=latest_results,
-            message="Verification still failing after repair attempts.",
+            message=f"Verification still failing after repair attempts: {diagnostic}",
         )
 
 

@@ -124,6 +124,144 @@ def test_live_coding_repair_loop(tmp_path):
         server.shutdown()
 
 
+def test_authoritative_protocol_is_auto_included_when_task_can_read_it(tmp_path):
+    repo, task = make_repo(tmp_path)
+    (repo / ".agent/decisions").mkdir(parents=True)
+    (repo / ".agent/project.yaml").write_text(
+        "id: PROJECT-TEST\nverified_facts:\n  api: shared-contract\n", encoding="utf-8"
+    )
+    (repo / ".agent/decisions/ADR-000001.yaml").write_text(
+        "id: ADR-000001\nrequirement_ids: [REQ-000001]\ndecision:\n  api:\n    field: paidAmountYuan\n",
+        encoding="utf-8",
+    )
+    task.adr_ids = ["ADR-000001"]
+    task.scope.read.append(".agent/**")
+    task.scope.deny = []
+
+    response = {
+        "status": "BLOCKED",
+        "summary": "context inspected",
+        "block_reason": "stop after context inspection",
+        "evidence": [],
+        "operations": [],
+    }
+    server, handler = start_server([response])
+    try:
+        runtime = LiveCodingRuntime(client_for(server), repo, set(), max_attempts=1)
+        result = runtime.execute(task, [], [])
+        assert result.status == "BLOCKED"
+        prompt = handler.requests[0]["messages"][1]["content"]
+        assert "FILE .agent/project.yaml:" in prompt
+        assert "FILE .agent/requirements/REQ-000001.yaml:" in prompt
+        assert "FILE .agent/decisions/ADR-000001.yaml:" in prompt
+        assert "FILE .agent/tasks/TASK-000101.yaml:" in prompt
+        assert "paidAmountYuan" in prompt
+    finally:
+        server.shutdown()
+
+
+def test_protocol_context_never_bypasses_task_deny_scope(tmp_path):
+    repo, task = make_repo(tmp_path)
+    response = {
+        "status": "BLOCKED",
+        "summary": "context inspected",
+        "block_reason": "stop after context inspection",
+        "evidence": [],
+        "operations": [],
+    }
+    server, handler = start_server([response])
+    try:
+        runtime = LiveCodingRuntime(client_for(server), repo, set(), max_attempts=1)
+        result = runtime.execute(task, ["target_tests/test_calc.py"], [])
+        assert result.status == "BLOCKED"
+        prompt = handler.requests[0]["messages"][1]["content"]
+        assert "FILE .agent/requirements/REQ-000001.yaml:" not in prompt
+        assert "FILE .agent/tasks/TASK-000101.yaml:" not in prompt
+    finally:
+        server.shutdown()
+
+
+def test_reviewer_feedback_gets_one_extra_bounded_repair_attempt(tmp_path):
+    repo, task = make_repo(tmp_path)
+    bad_one = {
+        "status": "SUCCESS",
+        "summary": "first repair",
+        "evidence": ["REQ-000001", "TASK-000101"],
+        "operations": [{"op": "write_text", "path": "app/calc.py", "content": "def add(a, b):\n    return a - b\n"}],
+    }
+    bad_two = {
+        "status": "SUCCESS",
+        "summary": "second repair",
+        "evidence": ["REQ-000001", "TASK-000101"],
+        "operations": [{"op": "write_text", "path": "app/calc.py", "content": "def add(a, b):\n    return 0\n"}],
+    }
+    good_three = {
+        "status": "SUCCESS",
+        "summary": "third repair",
+        "evidence": ["REQ-000001", "TASK-000101"],
+        "operations": [{"op": "write_text", "path": "app/calc.py", "content": "def add(a, b):\n    return a + b\n"}],
+    }
+    server, handler = start_server([bad_one, bad_two, good_three])
+    try:
+        runtime = LiveCodingRuntime(
+            client_for(server), repo, {Path(sys.executable).name}, max_attempts=2
+        )
+        result = runtime.execute(
+            task,
+            ["target_tests/test_calc.py"],
+            [VerificationSpec(argv=[sys.executable, "-m", "pytest", "-q", "target_tests/test_calc.py"])],
+            initial_feedback="READ-ONLY REVIEWER REQUESTED CHANGES: repair the calculator",
+        )
+        assert result.status == "SUCCESS"
+        assert result.attempts == 3
+        assert len(handler.requests) == 3
+        assert "return a + b" in (repo / "app/calc.py").read_text("utf-8")
+    finally:
+        server.shutdown()
+
+
+def test_delete_file_can_remove_obsolete_file_inside_read_write_scope(tmp_path):
+    repo, task = make_repo(tmp_path)
+    (repo / "app").mkdir()
+    (repo / "app/obsolete.py").write_text("OLD = True\n", encoding="utf-8")
+    response = {
+        "status": "SUCCESS",
+        "summary": "remove conflicting legacy implementation",
+        "evidence": ["REQ-000001", "TASK-000101"],
+        "operations": [{"op": "delete_file", "path": "app/obsolete.py"}],
+    }
+    server, _ = start_server([response])
+    try:
+        runtime = LiveCodingRuntime(client_for(server), repo, set(), max_attempts=1)
+        result = runtime.execute(task, ["app/obsolete.py"], [])
+        assert result.status == "SUCCESS"
+        assert not (repo / "app/obsolete.py").exists()
+    finally:
+        server.shutdown()
+
+
+def test_delete_file_requires_read_authority(tmp_path):
+    repo, task = make_repo(tmp_path)
+    (repo / "app").mkdir()
+    (repo / "app/obsolete.py").write_text("OLD = True\n", encoding="utf-8")
+    task.scope.read = ["target_tests/**"]
+    response = {
+        "status": "SUCCESS",
+        "summary": "blind delete attempt",
+        "evidence": ["REQ-000001", "TASK-000101"],
+        "operations": [{"op": "delete_file", "path": "app/obsolete.py"}],
+    }
+    server, _ = start_server([response])
+    try:
+        runtime = LiveCodingRuntime(client_for(server), repo, set(), max_attempts=1)
+        result = runtime.execute(task, [], [])
+        assert result.status == "FAILED"
+        assert "PolicyDenied" in result.message
+        assert (repo / "app/obsolete.py").exists()
+    finally:
+        server.shutdown()
+
+
 def test_missing_evidence_never_writes(tmp_path):
     repo, task = make_repo(tmp_path)
     response = {

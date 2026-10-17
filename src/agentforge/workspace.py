@@ -2,6 +2,7 @@ from pathlib import Path
 from agentforge.errors import PolicyDenied
 from agentforge.policy import PolicyEngine, norm
 
+
 class SafeWorkspace:
     def __init__(self, root: Path, policy: PolicyEngine):
         self.root = root.resolve()
@@ -32,3 +33,11 @@ class SafeWorkspace:
 
     def write_text(self, rel: str, content: str) -> None:
         self._target(rel).write_text(content, encoding="utf-8")
+
+    def delete_file(self, rel: str) -> None:
+        target = self.preflight_write(rel)
+        if not target.exists():
+            raise PolicyDenied(f"Delete target does not exist: {norm(rel)}")
+        if not target.is_file():
+            raise PolicyDenied(f"Delete target is not a regular file: {norm(rel)}")
+        target.unlink()
