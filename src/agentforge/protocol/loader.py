@@ -76,3 +76,9 @@ class ProjectProtocol:
             if isinstance(data, dict):
                 return data
         raise ProtocolError(f"Agent definition not found: {agent_id}")
+
+    def verification_policy(self) -> dict[str, Any]:
+        path = self.agent_root / "policies" / "verification.yaml"
+        if not path.exists():
+            return {"checks": {}}
+        return self.load_agent_yaml(path)
