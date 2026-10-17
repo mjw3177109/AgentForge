@@ -1,0 +1,1 @@
+<view class="page"><view class="title">AgentForge Shop</view><block wx:for="{{products}}" wx:key="id"><view class="card">{{item.name}} - ¥{{item.price}}</view></block></view>

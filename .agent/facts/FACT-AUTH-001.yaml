@@ -1,0 +1,6 @@
+id: FACT-AUTH-001
+type: CONVENTION
+status: ACTIVE
+statement: Backend business controllers receive CurrentUser through the server-side request attribute agentforge.auth.userId, populated only by an authenticated upstream filter; agents must not invent X-User-Id or trust client-supplied user IDs as authentication.
+source:
+  - ADR-AUTH-001
