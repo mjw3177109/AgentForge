@@ -1,0 +1,144 @@
+from __future__ import annotations
+
+import json
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+import pytest
+
+from agentforge.execution_profiles import load_execution_profiles
+from agentforge.probe import probe_model
+from agentforge.runtime_config import ExternalLLMSettings
+
+
+class _ProbeHandler(BaseHTTPRequestHandler):
+    def do_POST(self):  # noqa: N802
+        length = int(self.headers.get("Content-Length", "0"))
+        _ = json.loads(self.rfile.read(length).decode("utf-8"))
+        payload = {
+            "choices": [{"message": {"content": json.dumps({"ok": True, "message": "external-model-ready"})}}]
+        }
+        body = json.dumps(payload).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args):
+        return
+
+
+def _serve():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _ProbeHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    return server, thread
+
+
+def test_external_settings_reject_plain_http_remote(monkeypatch):
+    monkeypatch.setenv("AGENTFORGE_LLM_BASE_URL", "http://example.com/v1")
+    monkeypatch.setenv("AGENTFORGE_LLM_MODEL", "model-x")
+    monkeypatch.setenv("AGENTFORGE_LLM_API_KEY", "secret")
+    with pytest.raises(ValueError, match="HTTPS"):
+        ExternalLLMSettings.from_env()
+
+
+def test_external_settings_require_key_for_remote(monkeypatch):
+    monkeypatch.setenv("AGENTFORGE_LLM_BASE_URL", "https://example.com/v1")
+    monkeypatch.setenv("AGENTFORGE_LLM_MODEL", "model-x")
+    monkeypatch.delenv("AGENTFORGE_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("AGENTFORGE_LLM_ALLOW_ANONYMOUS", raising=False)
+    with pytest.raises(ValueError, match="API_KEY"):
+        ExternalLLMSettings.from_env()
+
+
+def test_external_settings_never_expose_api_key():
+    settings = ExternalLLMSettings(
+        base_url="https://example.com/v1",
+        model="model-x",
+        api_key="super-secret-token",
+    )
+    summary = json.dumps(settings.safe_summary())
+    assert "super-secret-token" not in summary
+    assert "api_key_configured" in summary
+
+
+def test_loopback_model_probe_uses_real_http_transport():
+    server, thread = _serve()
+    try:
+        settings = ExternalLLMSettings(
+            base_url=f"http://127.0.0.1:{server.server_port}/v1",
+            model="fake-live-model",
+        )
+        result = probe_model(settings.client())
+        assert result.ok is True
+        assert result.message == "external-model-ready"
+    finally:
+        server.shutdown()
+        thread.join(timeout=2)
+
+
+def test_execution_profiles_reject_shell(tmp_path: Path):
+    path = tmp_path / "profiles.yaml"
+    path.write_text(
+        """
+allowed_verification_executables: [bash, pytest]
+agents:
+  backend:
+    context_paths: [server]
+    verification:
+      - argv: [bash, -lc, pytest]
+        cwd: .
+""".strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Shell"):
+        load_execution_profiles(path)
+
+
+def test_execution_profiles_require_allowlisted_executable(tmp_path: Path):
+    path = tmp_path / "profiles.yaml"
+    path.write_text(
+        """
+allowed_verification_executables: [pytest]
+agents:
+  backend:
+    context_paths: [server]
+    verification:
+      - argv: [mvn, test]
+        cwd: server
+""".strip(),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="not allowlisted"):
+        load_execution_profiles(path)
+
+
+def test_execution_profiles_load_safe_commands(tmp_path: Path):
+    path = tmp_path / "profiles.yaml"
+    path.write_text(
+        """
+allowed_verification_executables: [pytest, mvn]
+agents:
+  backend:
+    context_paths: [server, .agent]
+    verification:
+      - argv: [mvn, test, -q]
+        cwd: server
+""".strip(),
+        encoding="utf-8",
+    )
+    loaded = load_execution_profiles(path)
+    assert loaded.allowed_executables == {"pytest", "mvn"}
+    assert loaded.profiles["backend"].verification[0].argv == ["mvn", "test", "-q"]
+
+
+def test_external_workflow_exists():
+    workflow = Path(".github/workflows/agentforge-external-live.yml")
+    assert workflow.exists()
+    text = workflow.read_text(encoding="utf-8")
+    assert "AGENTFORGE_LLM_API_KEY" in text
+    assert "agentforge model-check" in text

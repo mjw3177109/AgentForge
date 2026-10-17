@@ -1,0 +1,63 @@
+name: AgentForge External LLM Live
+
+on:
+  push:
+    branches: ["agentforge/v1.8-external-llm"]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "External model operation"
+        required: true
+        default: "probe"
+        type: choice
+        options: [probe, plan]
+      request:
+        description: "Requirement text for plan mode"
+        required: false
+        default: "给商城增加优惠券功能"
+
+permissions:
+  contents: read
+
+jobs:
+  external-llm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      AGENTFORGE_LLM_BASE_URL: ${{ vars.AGENTFORGE_LLM_BASE_URL }}
+      AGENTFORGE_LLM_MODEL: ${{ vars.AGENTFORGE_LLM_MODEL }}
+      AGENTFORGE_LLM_API_KEY: ${{ secrets.AGENTFORGE_LLM_API_KEY }}
+      AGENTFORGE_LLM_ALLOW_ANONYMOUS: ${{ vars.AGENTFORGE_LLM_ALLOW_ANONYMOUS }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install AgentForge
+        run: python -m pip install -e ".[dev]"
+      - name: Detect external model configuration
+        id: llm
+        shell: bash
+        run: |
+          if [[ -n "$AGENTFORGE_LLM_BASE_URL" && -n "$AGENTFORGE_LLM_MODEL" ]]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "External model endpoint/model are configured. API key value will never be printed."
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "External model is not configured. Set repository Variables AGENTFORGE_LLM_BASE_URL and AGENTFORGE_LLM_MODEL, plus Secret AGENTFORGE_LLM_API_KEY when required."
+          fi
+      - name: Probe real external model
+        if: steps.llm.outputs.configured == 'true' && (github.event_name != 'workflow_dispatch' || inputs.mode == 'probe')
+        run: agentforge model-check
+      - name: Plan with real external model
+        if: steps.llm.outputs.configured == 'true' && github.event_name == 'workflow_dispatch' && inputs.mode == 'plan'
+        env:
+          AGENTFORGE_REQUEST: ${{ inputs.request }}
+        shell: bash
+        run: agentforge plan "$AGENTFORGE_REQUEST" --req-id REQ-980001 --adr-id ADR-980001
+      - name: External model not configured
+        if: steps.llm.outputs.configured != 'true'
+        run: echo "SKIPPED_REAL_MODEL=true"
