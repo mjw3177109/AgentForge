@@ -42,6 +42,18 @@ def create_feature(repo: Path) -> str:
     return run(repo, "git", "rev-parse", "HEAD")
 
 
+class FakeGitHub:
+    def __init__(self):
+        self.created = []
+
+    def get_repository(self, owner, repo):
+        return {"full_name": f"{owner}/{repo}"}
+
+    def create_pull_request(self, owner, repo, head, base, title, body, draft=False):
+        self.created.append((owner, repo, head, base, title, draft))
+        return {"number": 88, "html_url": "https://example/pr/88", "state": "open"}
+
+
 def test_unmerged_feature_cannot_write_memory(tmp_path: Path):
     repo = init_repo(tmp_path)
     feature_sha = create_feature(repo)
@@ -75,8 +87,40 @@ def test_merged_feature_creates_reviewable_memory_branch_not_main(tmp_path: Path
     assert run(memory, "git", "status", "--porcelain") == ""
 
 
-def test_memory_requires_requirement_to_exist_on_default_branch(tmp_path: Path):
+def test_merged_but_unrelated_commit_cannot_be_cited_as_requirement_source(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    baseline_sha = run(repo, "git", "rev-parse", "HEAD")
+    feature_sha = create_feature(repo)
+    run(repo, "git", "checkout", "main")
+    run(repo, "git", "merge", "--no-ff", "feature/req-000777", "-m", "merge favorite")
+    assert feature_sha
+    with pytest.raises(MemorySyncError, match="does not contain REQ-000777"):
+        PostMergeMemoryService(repo).prepare("REQ-000777", baseline_sha)
+
+
+def test_memory_requires_requirement_to_exist_in_source_commit(tmp_path: Path):
     repo = init_repo(tmp_path)
     sha = run(repo, "git", "rev-parse", "HEAD")
-    with pytest.raises(MemorySyncError, match="not present"):
+    with pytest.raises(MemorySyncError, match="does not contain"):
         PostMergeMemoryService(repo).prepare("REQ-DOES-NOT-EXIST", sha)
+
+
+def test_create_pr_binds_delivery_after_memory_worktree_exists(tmp_path: Path):
+    repo = init_repo(tmp_path)
+    run(repo, "git", "remote", "add", "origin", "git@github.com:acme/shop.git")
+    feature_sha = create_feature(repo)
+    run(repo, "git", "checkout", "main")
+    run(repo, "git", "merge", "--no-ff", "feature/req-000777", "-m", "merge favorite")
+    fake = FakeGitHub()
+
+    result = PostMergeMemoryService(repo).prepare(
+        "REQ-000777",
+        feature_sha,
+        github=fake,
+        create_pr=True,
+        push=False,
+    )
+
+    assert result.pull_request["number"] == 88
+    assert fake.created[0][2] == "memory/req-000777"
+    assert fake.created[0][3] == "main"
