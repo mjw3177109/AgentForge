@@ -8,7 +8,9 @@ from pathlib import Path
 
 import pytest
 
+from agentforge.contracts import RequirementDraft
 from agentforge.execution_profiles import load_execution_profiles
+from agentforge.llm import OpenAICompatibleClient
 from agentforge.probe import probe_model
 from agentforge.runtime_config import ExternalLLMSettings
 
@@ -79,6 +81,53 @@ def test_loopback_model_probe_uses_real_http_transport():
     finally:
         server.shutdown()
         thread.join(timeout=2)
+
+
+def test_structured_client_includes_schema_and_repairs_validation_error(monkeypatch):
+    calls: list[str] = []
+    responses = iter([
+        json.dumps({
+            "id": "REQ-980001",
+            "title": "商城积分",
+            "actors": ["CUSTOMER"],
+            "modules": ["backend"],
+            "business_rules": ["消费可获得积分"],
+            "out_of_scope": [],
+        }, ensure_ascii=False),
+        json.dumps({
+            "id": "REQ-980001",
+            "title": "商城积分",
+            "actors": ["CUSTOMER"],
+            "modules": ["backend"],
+            "business_rules": ["消费可获得积分"],
+            "acceptance": ["积分规则可以被验证"],
+            "out_of_scope": [],
+        }, ensure_ascii=False),
+    ])
+
+    def fake_request(self, system: str, user: str) -> str:
+        calls.append(user)
+        return next(responses)
+
+    monkeypatch.setattr(OpenAICompatibleClient, "_request", fake_request)
+    client = OpenAICompatibleClient(
+        base_url="http://127.0.0.1:1",
+        api_key="",
+        model="fake",
+        max_attempts=2,
+    )
+    result = client.complete_model(
+        "system",
+        "Create requirement REQ-980001",
+        RequirementDraft,
+    )
+
+    assert result.id == "REQ-980001"
+    assert result.acceptance == ["积分规则可以被验证"]
+    assert "JSON Schema" in calls[0]
+    assert '"acceptance"' in calls[0]
+    assert "failed strict validation" in calls[1]
+    assert "acceptance" in calls[1]
 
 
 def test_execution_profiles_reject_shell(tmp_path: Path):
