@@ -1,0 +1,1 @@
+{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object","required":["id","title","status","requirement_ids","decision"],"properties":{"id":{"type":"string","pattern":"^ADR-[0-9]{6}$"},"status":{"enum":["PROPOSED","ACCEPTED","REJECTED","SUPERSEDED"]},"requirement_ids":{"type":"array"},"decision":{"type":"object"}}}

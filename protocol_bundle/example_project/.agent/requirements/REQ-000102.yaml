@@ -1,0 +1,4 @@
+id: REQ-000102
+title: 商品收藏
+status: READY
+acceptance: [商品详情显示收藏状态, 可以收藏和取消收藏, 个人中心可以查看收藏列表]
