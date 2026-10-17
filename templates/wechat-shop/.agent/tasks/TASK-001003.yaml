@@ -1,0 +1,16 @@
+id: TASK-001003
+requirement_ids: [REQ-000201]
+adr_ids: [ADR-000201]
+assigned_agent: miniapp
+dependencies: [TASK-001002]
+scope:
+  read: ["templates/wechat-shop/.agent/**", "templates/wechat-shop/miniapp/**"]
+  write: ["templates/wechat-shop/miniapp/**"]
+  deny: ["templates/wechat-shop/server/**", "templates/wechat-shop/database/**", "templates/wechat-shop/admin-web/**"]
+acceptance:
+  - 商品详情可查询收藏状态
+  - 用户可以收藏和取消收藏
+  - API 路径与 ADR-000201 一致
+verification:
+  - node-test
+status: VERIFYING

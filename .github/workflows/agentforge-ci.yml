@@ -50,3 +50,23 @@ jobs:
           cache: maven
       - name: Maven test
         run: mvn -B -q test
+
+  wechat-miniapp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: templates/wechat-shop/miniapp
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: templates/wechat-shop/miniapp/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Test
+        run: npm test
