@@ -1,0 +1,22 @@
+checks:
+  backend-test:
+    type: docker_command
+    image: maven:3.9.9-eclipse-temurin-17
+    cwd: server
+    command: ["mvn", "-q", "test"]
+    network: true
+    timeout: 900
+  admin-build:
+    type: docker_command
+    image: node:20-bookworm-slim
+    cwd: admin-web
+    command: ["bash", "-lc", "npm ci && npm run build"]
+    network: true
+    timeout: 900
+  miniapp-check:
+    type: docker_command
+    image: node:20-bookworm-slim
+    cwd: miniapp
+    command: ["bash", "-lc", "npm ci && npm test --if-present && npm run lint --if-present"]
+    network: true
+    timeout: 900

@@ -1,0 +1,7 @@
+id: ADR-000026
+title: 商品收藏数据模型与接口
+status: ACCEPTED
+requirement_ids: [REQ-000102]
+decision:
+  database: {create_tables: [user_product_favorite]}
+  api: {create: ["POST /api/favorites/{productId}", "DELETE /api/favorites/{productId}", "GET /api/favorites"]}

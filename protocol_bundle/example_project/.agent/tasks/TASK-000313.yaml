@@ -1,0 +1,10 @@
+id: TASK-000313
+requirement_ids: [REQ-000102]
+assigned_agent: backend
+dependencies: []
+scope:
+  read: [".agent/**", "server/**"]
+  write: ["server/**"]
+  deny: [".agent/requirements/**", "miniapp/**", "admin-web/**"]
+acceptance: [收藏接口与 ADR 一致]
+status: READY
