@@ -34,7 +34,7 @@ def test_invalid_success_is_retried_and_repaired(monkeypatch):
     prompts = []
     client = OpenAICompatibleClient("https://example.invalid", "test", "test", max_attempts=2)
 
-    def fake_request(system, user):
+    def fake_request(self, system, user):
         prompts.append(user)
         return next(responses)
 
