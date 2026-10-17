@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, model_validator
 
 from agentforge.contracts import TaskDraft
 from agentforge.evidence import EvidenceIndex
-from agentforge.errors import PolicyDenied
+from agentforge.errors import EvidenceError, PolicyDenied
 from agentforge.llm import OpenAICompatibleClient
 from agentforge.policy import PolicyEngine, norm
 from agentforge.workspace import SafeWorkspace
@@ -197,14 +197,21 @@ class LiveCodingRuntime:
 
         for attempt in range(1, self.max_attempts + 1):
             context = builder.build(task, active_paths)
+            evidence_ids = sorted(EvidenceIndex(self.repo_root).build().ids)
+            context += (
+                "\n\nAVAILABLE EVIDENCE IDS (evidence must contain ONLY exact IDs from this list; "
+                "file paths are context, not evidence IDs):\n"
+                + json_list(evidence_ids)
+            )
             if failure_feedback:
-                context += "\n\nVERIFICATION FAILED. Repair only the assigned task.\n" + failure_feedback
+                context += "\n\nPREVIOUS ATTEMPT REJECTED OR VERIFICATION FAILED. Repair only the assigned task.\n" + failure_feedback
             action = self.client.complete_model(
                 system=(
                     "You are a constrained coding agent. Return only JSON matching AgentAction. "
                     "You have no shell, git, network, or direct filesystem authority. "
                     "Only propose write_text operations inside the task write scope. "
-                    "Every successful action must cite repository evidence IDs."
+                    "Every successful action must cite repository evidence IDs exactly from AVAILABLE EVIDENCE IDS. "
+                    "Never use file paths, prose, or invented identifiers as evidence."
                 ),
                 user=context,
                 schema=AgentAction,
@@ -217,7 +224,22 @@ class LiveCodingRuntime:
                     actions=actions,
                     message=action.block_reason or action.summary,
                 )
-            changed = self._apply(task, action)
+            try:
+                changed = self._apply(task, action)
+            except (EvidenceError, PolicyDenied) as exc:
+                failure_feedback = (
+                    f"ACTION REJECTED BEFORE ANY FILE WRITE: {type(exc).__name__}: {exc}. "
+                    "Use only the exact AVAILABLE EVIDENCE IDS and only paths allowed by the task write scope."
+                )
+                if attempt < self.max_attempts:
+                    continue
+                return CodingResult(
+                    status="FAILED",
+                    attempts=attempt,
+                    actions=actions,
+                    verification=latest_results,
+                    message=failure_feedback,
+                )
             active_paths.extend(changed)
             latest_results = self.verifier.run(verification)
             if all(result.success for result in latest_results):
@@ -241,3 +263,8 @@ class LiveCodingRuntime:
             verification=latest_results,
             message="Verification still failing after repair attempts.",
         )
+
+
+def json_list(values: list[str]) -> str:
+    import json
+    return json.dumps(values, ensure_ascii=False)
