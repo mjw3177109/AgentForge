@@ -362,6 +362,8 @@ class AutonomousDevelopmentPipeline:
             f"{json.dumps(evidence_ids, ensure_ascii=False)}\n\n"
             "Put all criticism and requested changes in summary. evidence must contain ONLY exact IDs from AVAILABLE EVIDENCE IDS. "
             "For REQUEST_CHANGES, include every affected TASK id in evidence so the orchestrator can route repairs. "
+            "Evaluate all currently identifiable material defects across all tasks in this review; do not intentionally defer known defects to later review cycles. "
+            "Requested changes must stay within the requirement, ADR, VERIFIED contracts, and VERIFIED project context; do not invent endpoints, identity sources, or integration facts. "
             "Do not use file paths or prose in evidence. Existing unchanged files may not appear in DIFF; do not claim they are absent solely because they are not in DIFF.\n\n"
             f"DIFF:\n{git.diff_from(base_branch)}"
         )
@@ -465,7 +467,9 @@ class AutonomousDevelopmentPipeline:
             task_runs.append(record)
 
         review: ReviewDecision | None = None
-        for review_round in range(self.max_review_rounds + 1):
+        review_cycle = 0
+        repair_counts = {task.id: 0 for task in ordered_tasks}
+        while True:
             review = self._review(
                 plan=plan,
                 task_runs=task_runs,
@@ -484,17 +488,6 @@ class AutonomousDevelopmentPipeline:
                     review=review,
                     message=review.summary,
                 )
-            if review_round >= self.max_review_rounds:
-                return AutonomousResult(
-                    status="REVIEW_CHANGES",
-                    requirement_id=plan.requirement.id,
-                    adr_id=plan.architecture.id,
-                    feature_branch=branch,
-                    task_runs=task_runs,
-                    review=review,
-                    message=review.summary,
-                )
-
             affected_ids = [item for item in review.evidence if item.startswith("TASK-")]
             if not affected_ids:
                 return AutonomousResult(
@@ -507,9 +500,29 @@ class AutonomousDevelopmentPipeline:
                     message="Reviewer requested changes without routable TASK evidence.",
                 )
 
+            repairable_ids = [
+                task_id
+                for task_id in affected_ids
+                if task_id in task_by_id and repair_counts[task_id] < self.max_review_rounds
+            ]
+            if not repairable_ids:
+                return AutonomousResult(
+                    status="REVIEW_CHANGES",
+                    requirement_id=plan.requirement.id,
+                    adr_id=plan.architecture.id,
+                    feature_branch=branch,
+                    task_runs=task_runs,
+                    review=review,
+                    message=(
+                        "Reviewer still requests changes after all affected tasks exhausted "
+                        f"their per-task repair budget: {review.summary}"
+                    ),
+                )
+
             for task in ordered_tasks:
-                if task.id not in affected_ids:
+                if task.id not in repairable_ids:
                     continue
+                repair_attempt = repair_counts[task.id] + 1
                 profile = self.profiles[task.assigned_agent]
                 runtime = LiveCodingRuntime(
                     self.client,
@@ -522,7 +535,8 @@ class AutonomousDevelopmentPipeline:
                     context_paths=self._repair_context_paths(task, profile),
                     verification=profile.verification,
                     initial_feedback=(
-                        f"READ-ONLY REVIEWER REQUESTED CHANGES IN REVIEW ROUND {review_round + 1}:\n"
+                        f"READ-ONLY REVIEWER REQUESTED CHANGES IN REVIEW CYCLE {review_cycle + 1}; "
+                        f"TASK REPAIR ATTEMPT {repair_attempt}/{self.max_review_rounds}:\n"
                         f"{review.summary}\n\n"
                         f"Repair only {task.id}. Do not change files outside this task's scope."
                     ),
@@ -532,7 +546,10 @@ class AutonomousDevelopmentPipeline:
                     agent=task.assigned_agent,
                     status=result.status,
                     attempts=result.attempts,
-                    message=f"review repair round {review_round + 1}: {result.message}",
+                    message=(
+                        f"review repair round {review_cycle + 1}, task attempt "
+                        f"{repair_attempt}/{self.max_review_rounds}: {result.message}"
+                    ),
                 )
                 if result.status != "SUCCESS":
                     task_runs.append(record)
@@ -557,9 +574,12 @@ class AutonomousDevelopmentPipeline:
                         message=f"Reviewer requested changes for {task.id}, but repair produced no repository diff.",
                     )
                 record.commit = git.commit_all(
-                    f"fix({task.assigned_agent}): review repair {task.id} round {review_round + 1}"
+                    f"fix({task.assigned_agent}): review repair {task.id} attempt {repair_attempt}"
                 )
                 task_runs.append(record)
+                repair_counts[task.id] = repair_attempt
+
+            review_cycle += 1
 
         if review is None or review.status != "APPROVE":
             raise RuntimeError("Autonomous review loop ended without a decision")
