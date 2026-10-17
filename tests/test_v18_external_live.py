@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from agentforge.autonomous import AgentExecutionProfile, AutonomousDevelopmentPipeline
+from agentforge.coding import AgentAction, FileOperation, LiveCodingRuntime
 from agentforge.contracts import RequirementDraft, TaskDraft, TaskScope
 from agentforge.execution_profiles import load_execution_profiles
 from agentforge.llm import OpenAICompatibleClient
@@ -216,6 +217,49 @@ def test_execution_profile_blocks_planner_scope_expansion():
     )
     with pytest.raises(ValueError, match="expanded write scope"):
         AutonomousDevelopmentPipeline._validate_task_profile_scope(task, profile)
+
+
+def test_coding_runtime_retries_bad_evidence_before_write(tmp_path: Path):
+    evidence_path = tmp_path / ".agent/tasks/TASK-980101.yaml"
+    evidence_path.parent.mkdir(parents=True)
+    evidence_path.write_text('id: TASK-980101\n', encoding="utf-8")
+
+    class FakeClient:
+        def __init__(self):
+            self.calls = 0
+
+        def complete_model(self, system, user, schema):
+            self.calls += 1
+            if self.calls == 1:
+                assert "AVAILABLE EVIDENCE IDS" in user
+                return AgentAction(
+                    status="SUCCESS",
+                    evidence=["database/README.md"],
+                    operations=[FileOperation(op="write_text", path="out.txt", content="bad")],
+                )
+            assert "ACTION REJECTED BEFORE ANY FILE WRITE" in user
+            return AgentAction(
+                status="SUCCESS",
+                evidence=["TASK-980101"],
+                operations=[FileOperation(op="write_text", path="out.txt", content="good")],
+            )
+
+    task = TaskDraft(
+        id="TASK-980101",
+        requirement_ids=["REQ-980001"],
+        adr_ids=["ADR-980001"],
+        assigned_agent="backend",
+        dependencies=[],
+        scope=TaskScope(read=[], write=["out.txt"], deny=[]),
+        acceptance=["write accepted only with valid evidence"],
+        verification=[],
+    )
+    client = FakeClient()
+    result = LiveCodingRuntime(client, tmp_path, set(), max_attempts=2).execute(task, [], [])
+    assert result.status == "SUCCESS"
+    assert result.attempts == 2
+    assert client.calls == 2
+    assert (tmp_path / "out.txt").read_text(encoding="utf-8") == "good"
 
 
 def test_external_workflow_exists():
