@@ -447,9 +447,13 @@ def test_late_discovered_task_gets_its_own_repair_budget(tmp_path):
         first_review_prompt = llm_handler.requests[5]["body"]["messages"][1]["content"]
         assert "REQUEST_CHANGES has a strict burden of proof" in first_review_prompt
         assert "Do not use hypothetical or conditional concerns" in first_review_prompt
+        assert "AUTHORIZED TASK WRITE SCOPES" in first_review_prompt
+        assert "Tests and verification fixtures are maintainer-owned acceptance evidence" in first_review_prompt
+        assert "use BLOCKED and identify the missing independent test" in first_review_prompt
         admin_repair_prompt = llm_handler.requests[10]["body"]["messages"][1]["content"]
         assert "Act only on concrete reviewer findings that explicitly apply to TASK-910102" in admin_repair_prompt
         assert "VERIFIED contracts" in admin_repair_prompt
+        assert "Do not attempt to create or change tests outside this TASK's authorized write scope" in admin_repair_prompt
         assert run_git(repo, "rev-list", "--count", "main..HEAD") == "6"
     finally:
         llm_server.shutdown()

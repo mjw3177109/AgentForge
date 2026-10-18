@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 import subprocess
 import sys
 import time
@@ -32,7 +33,14 @@ def assess_result(payload: dict[str, Any] | None, exit_code: int) -> tuple[str, 
         if payload.get("status") == "REVIEW_CHANGES":
             return "review", "Reviewer rejected the final deliverable"
         if payload.get("status") == "BLOCKED":
-            return "agent_blocked", payload.get("message", "Agent blocked")
+            blocked = next(
+                (item for item in reversed(payload.get("task_runs") or [])
+                 if item.get("status") == "BLOCKED"), {}
+            )
+            return "agent_blocked", (
+                str(payload.get("message", "Agent blocked"))
+                + ": " + str(blocked.get("message", "No task-level reason recorded"))
+            )
         return "execution", f"Benchmark exit={exit_code}: {str(payload.get('message', ''))[:400]}"
     if payload.get("status") != "SUCCESS":
         return "orchestration", f"Unexpected final status: {payload.get('status')}"
@@ -65,6 +73,10 @@ def assess_result(payload: dict[str, Any] | None, exit_code: int) -> tuple[str, 
 
 def classify_failure(stage: str, details: str) -> str:
     low = details.lower()
+    if stage == "agent_blocked" and ("write scope" in low or "write_scope" in low) and (
+        "src/test/" in low or "tests/" in low or "junit" in low
+    ):
+        return "VERIFICATION_SCOPE_GAP"
     if "429" in low or "rate limit" in low:
         return "LLM_RATE_LIMIT"
     if "timed out" in low or "timeout" in low:
@@ -175,6 +187,60 @@ def verify_snapshot(snapshot: Path, folder: Path, index: int) -> list[dict[str, 
                        "exit_code": result["exit_code"] if not ok and result["exit_code"] else (0 if ok else 2),
                        "elapsed_seconds": result["elapsed_seconds"],
                        "error_excerpt": "" if ok else "Schema did not create both contract tables"})
+        if ok:
+            # Exercise the real MySQL uniqueness constraint under concurrent
+            # connections, not just a text grep of the generated SQL.
+            account_id = 98010000 + index
+            event_key = f"AF-V20-SAME-BUSINESS-NO-{index:02d}"
+            seed = _command(mysql, snapshot, 30, env=mysql_env, stdin=(
+                f"INSERT INTO `{schema}`.points_account "
+                "(user_id, balance_points, created_at, updated_at) "
+                f"VALUES ({account_id}, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);\n"
+            ))
+            if seed["exit_code"] == 0:
+                def concurrent_insert(row_id: int) -> dict[str, Any]:
+                    return _command(mysql, snapshot, 30, env=mysql_env, stdin=(
+                        f"INSERT INTO `{schema}`.points_ledger "
+                        "(id, user_id, business_no, entry_type, points_delta, "
+                        "order_paid_amount_yuan, created_at) "
+                        f"VALUES ({row_id}, {account_id}, '{event_key}', 'EARN', "
+                        "1, 1.00, CURRENT_TIMESTAMP);\n"
+                    ))
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    futures = [pool.submit(concurrent_insert, account_id * 10 + i)
+                               for i in (1, 2)]
+                    insert_results = [future.result() for future in futures]
+                count_result = _command(mysql, snapshot, 30, env=mysql_env, stdin=(
+                    f"SELECT COUNT(*) FROM `{schema}`.points_ledger "
+                    f"WHERE business_no='{event_key}';\n"
+                ))
+                successful = sum(r["exit_code"] == 0 for r in insert_results)
+                failed = [r for r in insert_results if r["exit_code"] != 0]
+                valid = (
+                    successful == 1 and len(failed) == 1
+                    and ("Duplicate entry" in failed[0]["stderr"]
+                         or "1062" in failed[0]["stderr"])
+                    and count_result["exit_code"] == 0
+                    and count_result["stdout"].strip() == "1"
+                )
+            else:
+                insert_results = []
+                count_result = {"exit_code": 1, "stdout": "", "stderr": "account seed failed"}
+                valid = False
+            (folder / "mysql_concurrent_ledger_uniqueness.log").write_text(
+                json.dumps({"seed": seed, "inserts": insert_results,
+                            "count": count_result}, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            checks.append({
+                "name": "mysql_concurrent_ledger_uniqueness",
+                "status": "PASS" if valid else "FAIL",
+                "exit_code": 0 if valid else 2,
+                "error_excerpt": "" if valid else (
+                    "Two concurrent inserts with the same business_no did not "
+                    "produce exactly one committed ledger row and one duplicate-key rejection."
+                ),
+            })
     finally:
         _gate(folder, "mysql_cleanup", mysql, snapshot, 30,
               stdin=f"DROP DATABASE IF EXISTS `{schema}`;\n", env=mysql_env)

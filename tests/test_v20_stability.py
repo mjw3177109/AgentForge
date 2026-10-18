@@ -155,6 +155,8 @@ def test_gate_enforces_repair_budget_and_blocks_fake_green():
     ("execution", "provider returned 429", "LLM_RATE_LIMIT"),
     ("execution", "timed out", "TIMEOUT"),
     ("maven", "test error", "MAVEN_CONTRACT"),
+    ("agent_blocked", "Reviewer demands JUnit tests in server/src/test/** outside write scope", "VERIFICATION_SCOPE_GAP"),
+    ("mysql_concurrent_ledger_uniqueness", "duplicate-key race failed", "MYSQL_CONTRACT"),
     ("mysql_schema", "schema error", "MYSQL_CONTRACT"),
     ("npm_vite", "bundle error", "NODE_CONTRACT"),
     ("release_safety", "unexpected PR", "UNSAFE_RELEASE"),
@@ -172,3 +174,25 @@ def test_verified_cross_stack_contracts_match_without_making_up_admin_scope():
     assert contract["public_user_api"]["redeem_preview"]["path"] == contract["miniapp"]["redeem_preview_path"]
     assert contract["earning"]["public_endpoint"] == "forbidden"
     assert contract["earning"]["service_operation"] == "earnAfterPayment"
+
+
+def test_agent_blocked_failure_exposes_review_owned_test_scope_gap():
+    payload = _success_result()
+    payload["status"] = "BLOCKED"
+    payload["message"] = "Reviewer repair for TASK-000002 did not complete successfully"
+    payload["task_runs"].append({
+        "task_id": "TASK-000002", "agent": "backend", "status": "BLOCKED",
+        "commit": None, "message": "JUnit tests under server/src/test/** are outside write scope"
+    })
+    stage, reason = gate.assess_result(payload, 2)
+    assert stage == "agent_blocked"
+    assert "server/src/test/**" in reason
+    assert gate.classify_failure(stage, reason) == "VERIFICATION_SCOPE_GAP"
+
+
+def test_mysql_concurrency_gate_is_present_and_reports_distinct_failure_type():
+    source = Path(__file__).resolve().parents[1] / "scripts/run_v20_stability.py"
+    code = source.read_text(encoding="utf-8")
+    assert "ThreadPoolExecutor(max_workers=2)" in code
+    assert "mysql_concurrent_ledger_uniqueness" in code
+    assert "Duplicate entry" in code

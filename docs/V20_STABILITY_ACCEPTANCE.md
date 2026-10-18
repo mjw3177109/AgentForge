@@ -12,7 +12,7 @@ V2.0 must verify reliability and fail closed. The validation branch is `verify/v
 2. Fault injection passes for HTTP 429, 500, 502, and 503; a temporary failure must recover, repeated failures must raise `LLMError` and never produce false success.
 3. A **fresh real-model** DeepSeek hardened autonomous benchmark is executed **three times**, with an independently created benchmark repository each round.
 4. Every round requires: final `SUCCESS`, four distinct initial Agent successes (Database, Backend, Miniapp, Admin), a non-empty commit on every task run, maximum two reviewer Repairs per task, final Reviewer `APPROVE`, and **no auto PR/push**.
-5. After **every** real round, independently rerun immutable Database, Backend, Miniapp and Admin Node contract tests, Maven tests, Vue/Vite npm build, and apply the generated SQL migration to an **isolated ephemeral MySQL schema**. Do not turn skipped tests into PASS.
+5. After **every** real round, independently rerun immutable Database, Backend, Miniapp and Admin Node contract tests, Maven tests, Vue/Vite npm build, apply the generated SQL migration to an **isolated ephemeral MySQL schema**, and attempt simultaneous duplicate `business_no` ledger inserts using separate MySQL connections. Exactly one insert must commit and the other must fail with a duplicate-key error; the ledger must contain one event row. Do not turn skipped tests into PASS.
 6. `artifacts/v20-stability/summary.json` must read `overall=PASS`, `rounds_required=3`, `rounds_passed=3`; archive all per-round generated repositories, logs, failures, and independent gate results.
 7. If an HTTP fault, Reviewer rejection, contract mismatch, Maven/Vite/MySQL failure, or timeout occurs, mark the affected round FAIL; finish later rounds for evidence but return nonzero overall.
 
@@ -42,3 +42,11 @@ python scripts/run_v20_stability.py --rounds 3 --round-timeout 1200 --output-dir
 - The three fresh DeepSeek runs measure acceptance reliability on **this one task and model configuration**, not general task distribution performance. The observed pass rate should be reported literally (e.g. 2/3), never portrayed as a population reliability guarantee.
 - The workflow deliberately excludes production database access and any automatic merging.
 - Artifacts are retained for seven days by the workflow. Record final run links and outcome when complete.
+
+## Verification ownership and review/repair boundary
+
+A generated Backend TASK may modify production source only inside its approved write scope; it must not be instructed to write JUnit tests under `server/src/test/**` unless a separately authorized verification task is explicitly granted that path. The read-only Reviewer now sees authorized TASK write scopes. It should request concrete fixes in writable production code and distinguish independent coverage gaps (maintainer-owned tests) from defects in the implementation. If a critical behavior is not verifiable, the correct verdict is BLOCKED, not a fictional permission grant or automatic APPROVE. This is a stricter security rule, not a bypass of verification.
+
+The independent concurrent MySQL check proves only **ledger-level uniqueness under two concurrent writes**, not that Java transactional account-credit updates are exactly-once. It does not establish Redis unavailability fallback or live HTTP redemption boundary behavior. These remain explicitly unverified until a separate trusted behavioral harness exercises them; do not claim production readiness merely from three synthetic benchmark passes.
+
+When an Agent refuses Reviewer-requested tests outside its scope, the run report preserves the task's actual BLOCKED reason and uses failure class `VERIFICATION_SCOPE_GAP` rather than the generic framework/environment class.
