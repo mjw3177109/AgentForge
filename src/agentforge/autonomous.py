@@ -308,8 +308,32 @@ class AutonomousDevelopmentPipeline:
     def _scope_entry_within_ceiling(entry: str, ceilings: list[str]) -> bool:
         if entry in ceilings:
             return True
+
         if any(char in entry for char in "*?["):
+            # A planner may narrow a profile's / ** tree ceiling to a deeper
+            # / ** tree (e.g. server/src/main/** -> server/src/main/java/**).
+            # Only trailing recursive directory globs are provably contained.
+            # Arbitrary patterns, traversal segments, and sibling trees remain
+            # denied rather than being assumed safe.
+            if not entry.endswith("/**") or entry.count("*") != 2:
+                return False
+            root = entry[:-3]
+            if not root or any(seg in {"", ".", ".."} for seg in root.split("/")):
+                return False
+            if any(char in root for char in "*?[\\"):
+                return False
+            for ceiling in ceilings:
+                if not ceiling.endswith("/**") or ceiling.count("*") != 2:
+                    continue
+                base = ceiling[:-3]
+                if not base or any(seg in {"", ".", ".."} for seg in base.split("/")):
+                    continue
+                if any(char in base for char in "*?[\\"):
+                    continue
+                if root == base or root.startswith(base + "/"):
+                    return True
             return False
+
         return any(fnmatchcase(entry, ceiling) for ceiling in ceilings)
 
     @classmethod
