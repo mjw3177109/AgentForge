@@ -219,6 +219,52 @@ def test_execution_profile_blocks_planner_scope_expansion():
         AutonomousDevelopmentPipeline._validate_task_profile_scope(task, profile)
 
 
+@pytest.mark.parametrize(
+    ("proposal", "allowed"),
+    [
+        ("server/src/main/java/com/agentforge/shop/points/**", True),
+        ("server/src/main/**", True),
+        ("server/src/main/points/PointsController.java", True),
+        ("server/src/test/**", False),
+        ("server/src/main-extra/**", False),
+        ("server/src/main/../test/**", False),
+        ("server/src/main/java/*/../**", False),
+        ("server/src/main/java/poi?ts/**", False),
+        ("**", False),
+        ("database/**", False),
+    ],
+)
+def test_profile_ceiling_proves_narrower_tree_scope_without_widening(proposal, allowed):
+    profile = ["server/src/main/**"]
+    assert AutonomousDevelopmentPipeline._scope_entry_within_ceiling(proposal, profile) is allowed
+
+
+def test_real_hardened_backend_narrower_glob_passes_profile_scope():
+    profile = AgentExecutionProfile(
+        context_paths=[".agent/project.yaml"],
+        read_scope=["server/**", ".agent/**"],
+        write_scope=["server/src/main/**"],
+        deny_scope=["database/**", "miniapp/**", "admin-web/**"],
+    )
+    task = TaskDraft(
+        id="TASK-000002",
+        requirement_ids=["REQ-980100"],
+        adr_ids=["ADR-980100"],
+        assigned_agent="backend",
+        dependencies=[],
+        scope=TaskScope(
+            read=["server/**", ".agent/**"],
+            write=["server/src/main/java/com/agentforge/shop/points/**"],
+            deny=[],
+        ),
+        acceptance=["Backend changes remain within allowed production source tree"],
+        verification=[],
+    )
+    AutonomousDevelopmentPipeline._validate_task_profile_scope(task, profile)
+    assert task.scope.write == ["server/src/main/java/com/agentforge/shop/points/**"]
+    assert "database/**" in task.scope.deny
+
+
 def test_execution_profile_allows_concrete_paths_inside_glob_and_inherits_denies():
     profile = AgentExecutionProfile(
         context_paths=["database/README.md", ".agent/project.yaml"],

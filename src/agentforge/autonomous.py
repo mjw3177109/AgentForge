@@ -308,8 +308,32 @@ class AutonomousDevelopmentPipeline:
     def _scope_entry_within_ceiling(entry: str, ceilings: list[str]) -> bool:
         if entry in ceilings:
             return True
+
         if any(char in entry for char in "*?["):
+            # A planner may narrow a profile's / ** tree ceiling to a deeper
+            # / ** tree (e.g. server/src/main/** -> server/src/main/java/**).
+            # Only trailing recursive directory globs are provably contained.
+            # Arbitrary patterns, traversal segments, and sibling trees remain
+            # denied rather than being assumed safe.
+            if not entry.endswith("/**") or entry.count("*") != 2:
+                return False
+            root = entry[:-3]
+            if not root or any(seg in {"", ".", ".."} for seg in root.split("/")):
+                return False
+            if any(char in root for char in "*?[\\"):
+                return False
+            for ceiling in ceilings:
+                if not ceiling.endswith("/**") or ceiling.count("*") != 2:
+                    continue
+                base = ceiling[:-3]
+                if not base or any(seg in {"", ".", ".."} for seg in base.split("/")):
+                    continue
+                if any(char in base for char in "*?[\\"):
+                    continue
+                if root == base or root.startswith(base + "/"):
+                    return True
             return False
+
         return any(fnmatchcase(entry, ceiling) for ceiling in ceilings)
 
     @classmethod
@@ -388,6 +412,13 @@ class AutonomousDevelopmentPipeline:
     ) -> ReviewDecision:
         evidence_index = EvidenceIndex(self.repo_root).build()
         evidence_ids = sorted(evidence_index.ids)
+        # The reviewer can ask for repairs only in a TASK's actual write scope.
+        # Immutable verification fixtures are maintainer-owned, not writable
+        # by any agent unless a separate, explicitly authorized task exists.
+        task_write_scopes = {
+            task.id: {"agent": task.assigned_agent, "write": task.scope.write}
+            for task in plan.tasks.tasks
+        }
         prompt = (
             f"REQUIREMENT:\n{plan.requirement.model_dump_json()}\n\n"
             f"ARCHITECTURE:\n{plan.architecture.model_dump_json()}\n\n"
@@ -395,6 +426,7 @@ class AutonomousDevelopmentPipeline:
             f"TASK RUNS (orchestrator-recorded verification status):\n"
             f"{json.dumps([record.model_dump() for record in task_runs], ensure_ascii=False, indent=2)}\n\n"
             f"VERIFIED REVIEW CONTEXT (project facts, contracts, and declared agent context):\n{self._review_context()}\n\n"
+            f"AUTHORIZED TASK WRITE SCOPES:\n{json.dumps(task_write_scopes, ensure_ascii=False)}\n\n"
             "AVAILABLE EVIDENCE IDS:\n"
             f"{json.dumps(evidence_ids, ensure_ascii=False)}\n\n"
             "Put all criticism and requested changes in summary. evidence must contain ONLY exact IDs from AVAILABLE EVIDENCE IDS. "
@@ -406,6 +438,10 @@ class AutonomousDevelopmentPipeline:
             "Do not require an 'existing' integration, auth client, privileged scope, event handler, endpoint, or other project component unless it is explicitly present in VERIFIED REVIEW CONTEXT or DIFF. "
             "When a VERIFIED contract defines an internal service seam for a trusted external flow but VERIFIED REVIEW CONTEXT contains no integration component, review the seam itself and do not invent an integration target. "
             "When a VERIFIED contract names the endpoint or scope a consumer must use, do not infer a broader privileged endpoint or scope that the contract does not define. "
+            "Tests and verification fixtures are maintainer-owned acceptance evidence. Do not request that a coding TASK create, overwrite, or edit a test file outside its AUTHORIZED TASK WRITE SCOPES. "
+            "When you find a concrete production behavior defect, describe its observable failure and request a change in the affected TASK's authorized production files; do not require a new test file as the only repair. "
+            "If a critical property cannot be established solely because additional independent verification is needed and no TASK owns those verification paths, use BLOCKED and identify the missing independent test, rather than routing an impossible REQUEST_CHANGES repair or inventing permission. "
+            "Never treat incomplete test coverage as evidence that a known behavioral defect is acceptable. "
             "Do not use file paths or prose in evidence. Existing unchanged files may not appear in DIFF; use VERIFIED REVIEW CONTEXT before claiming an unchanged project component is absent.\n\n"
             f"DIFF:\n{git.diff_from(base_branch)}"
         )
@@ -584,7 +620,8 @@ class AutonomousDevelopmentPipeline:
                         f"Act only on concrete reviewer findings that explicitly apply to {task.id}; ignore findings that name only other TASK ids. "
                         "REQUIREMENT, ARCHITECTURE, VERIFIED contracts, and your readable VERIFIED project context outrank reviewer prose. "
                         "Do not invent or assume missing integration, auth, client, endpoint, event, or privileged-scope components. "
-                        "If reviewer prose depends on a project component absent from your readable verified context, do not fabricate that component; fix the supported in-scope findings instead."
+                        "If reviewer prose depends on a project component absent from your readable verified context, do not fabricate that component; fix the supported in-scope findings instead. "
+                        "Do not attempt to create or change tests outside this TASK's authorized write scope. If the only remaining concern is independent test coverage, say which maintainer-owned check is missing instead of widening permissions."
                     ),
                 )
                 record = TaskRunRecord(
