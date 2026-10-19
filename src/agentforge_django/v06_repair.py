@@ -38,7 +38,19 @@ class Budget:
         if self.calls >= self.max_calls:
             raise BoundaryDenied("V0.6 model request budget exhausted")
         self.calls += 1  # Count attempted requests, including failures.
-        return _call(client, role, instruction, schema)
+        if not hasattr(client, "v12_role_trace"):
+            client.v12_role_trace = []
+        event = {"role": role, "status": "ATTEMPTED"}
+        client.v12_role_trace.append(event)
+        try:
+            value = _call(client, role, instruction, schema)
+        except Exception as exc:
+            event["status"] = "ERROR"
+            # No exception messages, prompts, or model text in persisted reports.
+            event["error_type"] = type(exc).__name__[:64]
+            raise
+        event["status"] = "SCHEMA_ACCEPTED"
+        return value
 
     def verify(self, workspace):
         self.check_time()

@@ -703,3 +703,42 @@ Authorization、模型、`max_tokens`、请求失败扣额度和 429 不重试�
 现有真实 DeepSeek 3/3 付费工作流仍然为显式 opt-in，
 未启用时不会调用 API。HTTP 模拟测试不等于真实 DeepSeek 已通过。
 生产 VM 与真实业务项目验收也仍独立。
+
+
+## V1.2 — 真实模型三案例验收数据与人工对比报告
+
+本阶段保留 V1.1 的三个真实 Django 基准：算术、整数折扣和对象权限，
+不继续靠重复同一道题提升数字。每例都追踪 Planner、Executor、
+Reviewer、Fixer 的调用结果，并记录角色请求数、经过一次修复的案例数、
+Docker 业务测试的实际用例数。模型提示词、测试原始日志和 API
+密钥绝不进入可公开的报告。
+
+来自 DeepSeek API 的 token 字段只在服务器真正返回有效 usage 时汇总。
+覆盖情况独立标为 COMPLETE、PARTIAL 或 UNKNOWN。部分失败请求
+可能不会返回 token 统计，所以使用量不是完整费用凭证，
+也不推断人民币或美元总费用。离线 ScriptedFakeAgent 的覆盖状态固定
+为 NOT_APPLICABLE，绝不能声称真实模型通过。
+
+免费验证：
+~~~bash
+python scripts/run_django_v11_offline.py
+python scripts/render_django_v12_report.py \
+  --input artifacts/django-v11/offline-report.json \
+  --output artifacts/django-v11/operator-summary.md
+~~~
+Docker Smoke CI 使用真实 Docker 业务测试与脚本模拟 Agent，
+输出 JSON 与 Markdown 两份证据。同一个验收逻辑被真实 DeepSeek
+入口复用，真实运行时可执行：
+~~~bash
+python scripts/run_django_v11_live.py --confirm-paid-calls
+python scripts/render_django_v12_report.py \
+  --input artifacts/django-v11-live/report.json \
+  --output artifacts/django-v11-live/operator-summary.md
+~~~
+第二段是**付费**模型调用入口，不会因为正常 git push 自动执行。
+仓库原有 GitHub Actions 付费工作流仍有明确变量门禁。本次没有修改该
+付费工作流，也没有触发它；任何实际模型验收结论必须同时检查对应
+GitHub 运行日志及原始脱敏 JSON 证据。
+
+V1.2 的 CI 通过只证明报告正确生成和现有工程回归稳定，
+不证明真实 DeepSeek 3/3、持久化独立 VM 已部署或生产可用。

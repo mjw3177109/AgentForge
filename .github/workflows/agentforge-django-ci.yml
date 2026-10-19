@@ -52,11 +52,19 @@ jobs:
         run: python scripts/run_django_v06_smoke.py
       - name: V1.1 three DISTINCT Django benchmarks, with scripted agents and real Docker tests
         run: python scripts/run_django_v11_offline.py
-      - name: Archive V1.1 offline 3-case evidence
+      - name: Render V1.2 redacted case comparison
+        if: always()
+        run: |
+          if [ -f artifacts/django-v11/offline-report.json ]; then
+            python scripts/render_django_v12_report.py \
+              --input artifacts/django-v11/offline-report.json \
+              --output artifacts/django-v11/operator-summary.md
+          fi
+      - name: Archive V1.2 case evidence and operator summary
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: agentforge-v11-scripted-agents-real-docker-report
-          path: artifacts/django-v11/offline-report.json
+          name: agentforge-v12-scripted-agent-real-docker-evidence
+          path: artifacts/django-v11/
           retention-days: 14
           if-no-files-found: warn

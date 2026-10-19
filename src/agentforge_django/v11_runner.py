@@ -13,6 +13,7 @@ from .live_evidence import failed_round
 from .v06_repair import produce_candidate_v06
 from .v11_benchmark import SCENARIOS, make_scenario, suite_fingerprint
 from .v11_evaluation import grade_case, summarize_suite, test_count
+from .v12_reporting import attach_case_telemetry, attach_suite_metrics
 
 
 def _sha(path):
@@ -24,6 +25,7 @@ def run_three_case_suite(model_factory, *, model_kind):
         raise ValueError("Unsupported model provenance")
     results = []
     for case in SCENARIOS:
+        client = None
         try:
             with tempfile.TemporaryDirectory(prefix="agentforge-v11-") as tmp:
                 root = make_scenario(Path(tmp) / "source", case)
@@ -72,10 +74,14 @@ def run_three_case_suite(model_factory, *, model_kind):
             result["case_id"] = case.identifier
             result["category"] = case.category
             results.append(result)
+        finally:
+            if results and results[-1].get("case_id") == case.identifier:
+                attach_case_telemetry(results[-1], client, model_kind)
     summary = summarize_suite(
         results, manifest_sha256=suite_fingerprint(), model_kind=model_kind
     )
     summary["evaluated_at"] = datetime.now(timezone.utc).isoformat()
+    attach_suite_metrics(summary)
     summary["candidate_only"] = True
     summary["source_or_test_files_committed"] = False
     return summary
