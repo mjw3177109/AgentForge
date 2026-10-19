@@ -22,13 +22,15 @@ class HeartbeatContractTests(TestCase):
         )
         self.lease = JobLease.objects.create(project=self.project, job=self.job)
 
-    def test_lost_lease_blocks_a_successful_validator(self):
+    def test_operator_recovery_blocks_late_success_and_worker_audit(self):
         import tempfile
         from pathlib import Path
         from agentforge_django.runner import run_job
+        from agentforge_django.recovery import recover_stopped_worker
         from agentforge_django.v05_fixture import make_fixture
+        from agentforge_django.audit import verify_chain
 
-        with tempfile.TemporaryDirectory(prefix="af-v09-fence-") as folder:
+        with tempfile.TemporaryDirectory(prefix="af-v10-recovery-") as folder:
             root = make_fixture(Path(folder) / "django")
             self.project.root_path = str(root)
             self.project.enabled = True
@@ -38,21 +40,31 @@ class HeartbeatContractTests(TestCase):
                 status=AgentJob.Status.PENDING,
             )
             self.lease.delete()
+
+            def simulate_verification_with_interrupted_worker(*args, **kwargs):
+                # Emulates another administrator fencing this worker while
+                # its independent verifier is busy; no real task gets deployed.
+                recover_stopped_worker(job.pk, operator_confirmed=True)
+                return {
+                    "backend": "docker-offline", "passed": True,
+                    "business_tests_executed": True,
+                    "checks": [{"success": True}, {"success": True}],
+                }
+
             with override_settings(
                 AGENTFORGE_ALLOWED_ROOTS=[str(root)],
                 AGENTFORGE_V09_HEARTBEAT_ENABLED=False,
             ), patch(
                 "agentforge_django.runner.isolated_verification",
-                return_value={
-                    "backend": "docker-offline", "passed": True,
-                    "business_tests_executed": True,
-                    "checks": [{"success": True, "returncode": 0},
-                               {"success": True, "returncode": 0}],
-                },
-            ), patch("agentforge_django.runner.lease_owned", return_value=False):
+                side_effect=simulate_verification_with_interrupted_worker,
+            ):
                 result = run_job(job.pk)
             self.assertEqual(result.status, AgentJob.Status.BLOCKED)
-            self.assertEqual(result.result["failure_class"], "WORKER_LEASE_LOST")
+            self.assertEqual(
+                result.result["failure_class"], "INTERRUPTED_OR_ABANDONED_WORKER"
+            )
+            self.assertEqual(result.events.last().phase, "operator_recovery")
+            self.assertTrue(verify_chain(result))
 
     def test_lease_token_fences_stale_worker(self):
         self.assertTrue(lease_owned(

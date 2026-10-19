@@ -34,17 +34,31 @@ def _git(root, *args, timeout=30):
     return done.stdout.strip()
 
 
-def _autonomous(job, root):
+def record_while_owned(job, token, phase, decision, detail=None):
+    """Worker audit is fenced by job state and exact PostgreSQL lease owner."""
+    with transaction.atomic():
+        locked = AgentJob.objects.select_for_update().get(pk=job.pk)
+        if locked.status != AgentJob.Status.RUNNING:
+            raise BoundaryDenied("Recovered job cannot append worker audit")
+        lease = JobLease.objects.select_for_update().filter(
+            project_id=job.project_id, job_id=job.pk, owner_token=token,
+        ).first()
+        if lease is None:
+            raise BoundaryDenied("Worker audit denied: lease owner changed")
+        return record(locked, phase, decision, detail)
+
+
+def _autonomous(job, root, token):
     if getattr(settings, "AGENTFORGE_V05_ISOLATED_AUTONOMOUS", False):
         from .v05_coding import run_approved_v05
         outcome = run_approved_v05(job, root)
         decision = outcome.get("status")
-        record(job, "v05_review", outcome.get("review_decision", "NOT_RUN"), {
+        record_while_owned(job, token, "v05_review", outcome.get("review_decision", "NOT_RUN"), {
             "model_calls": outcome.get("model_calls"),
             "source_file_count": len(outcome.get("source_files", [])),
         })
         verification = outcome.get("independent_verification", {})
-        record(job, "v05_validator", "PASS" if verification.get("passed") else "NOT_PASS", {
+        record_while_owned(job, token, "v05_validator", "PASS" if verification.get("passed") else "NOT_PASS", {
             "backend": verification.get("backend", "NOT_RUN"),
             "checks": len(verification.get("checks", [])),
         })
@@ -146,14 +160,14 @@ def _autonomous(job, root):
             "feature_branch": result.feature_branch,
             "release": "NOT_AUTHORIZED",
         }
-        record(job, "reviewer", result.review.status if result.review else "NOT_RUN",
+        record_while_owned(job, token, "reviewer", result.review.status if result.review else "NOT_RUN",
                {"status": result.status, "task_count": len(result.task_runs)})
         if result.status != "SUCCESS" or not result.review or result.review.status != "APPROVE":
             return AgentJob.Status.BLOCKED, summary
         independent = isolated_verification(
             sandbox, with_tests=project.run_business_tests,
         )
-        record(job, "validator", "PASS" if independent["passed"] else "FAIL",
+        record_while_owned(job, token, "validator", "PASS" if independent["passed"] else "FAIL",
                {"checks": [{"argv": c["argv"], "success": c["success"]}
                            for c in independent["checks"]]})
         summary["independent_verification"] = independent
@@ -233,12 +247,12 @@ def _run_claimed_job(job, *, token=None, heartbeat=None):
     """Finalize status and audit even if the execution fails."""
     status, result = AgentJob.Status.BLOCKED, {}
     try:
-        record(job, "intake", "CLAIMED", {"mode": job.mode})
+        record_while_owned(job, token, "intake", "CLAIMED", {"mode": job.mode})
         if not job.project.enabled:
             raise BoundaryDenied("Project is disabled by default")
         root = checked_root(job.project.root_path)
         manifest = inspect_python(root)
-        record(job, "planner", "PASS", {
+        record_while_owned(job, token, "planner", "PASS", {
             "python_files": manifest["python_files"],
             "django_detected": manifest["django_detected"],
         })
@@ -251,7 +265,7 @@ def _run_claimed_job(job, *, token=None, heartbeat=None):
             proposed = advisor(job.request, sanitized_manifest(root))
             result = {"static": manifest, "ai_plan": proposed,
                       "business_tests": "NOT_RUN", "scope": "READ_ONLY"}
-            record(job, "reviewer", "PASS", {"static_findings": len(manifest["findings"])})
+            record_while_owned(job, token, "reviewer", "PASS", {"static_findings": len(manifest["findings"])})
             status = AgentJob.Status.PASS
         elif job.mode == AgentJob.Mode.VERIFY:
             if not job.project.run_business_tests:
@@ -261,13 +275,13 @@ def _run_claimed_job(job, *, token=None, heartbeat=None):
             )
             result = {"static": manifest, "independent_verification": independent}
             status = AgentJob.Status.PASS if independent["passed"] else AgentJob.Status.FAIL
-            record(job, "validator", status, {
+            record_while_owned(job, token, "validator", status, {
                 "checks": [{"argv": c["argv"], "success": c["success"]}
                            for c in independent["checks"]],
                 "business_tests_executed": independent["business_tests_executed"],
             })
         elif job.mode == AgentJob.Mode.AUTONOMOUS:
-            status, result = _autonomous(job, root)
+            status, result = _autonomous(job, root, token)
         else:
             raise BoundaryDenied("Unrecognized job mode")
     except BoundaryDenied as exc:
@@ -280,36 +294,9 @@ def _run_claimed_job(job, *, token=None, heartbeat=None):
         status, result = AgentJob.Status.FAIL, {
             "failure_class": "RUNTIME_OR_ENVIRONMENT", "error_type": type(exc).__name__}
     finally:
-        if heartbeat is not None:
-            heartbeat.stop()
-            if not isinstance(result, dict):
-                result = {"failure_class": "INVALID_EXECUTION_RESULT"}
-            result["worker_heartbeat"] = {
-                "enabled": bool(getattr(settings, "AGENTFORGE_V09_HEARTBEAT_ENABLED", False)),
-                "beats": heartbeat.beats,
-                "ownership_preserved": not heartbeat.lost.is_set(),
-            }
-        if token is not None and (
-            (heartbeat is not None and heartbeat.lost.is_set())
-            or not lease_owned(project_id=job.project_id, job_id=job.pk, token=token)
-        ):
-            status, result = AgentJob.Status.BLOCKED, {
-                "failure_class": "WORKER_LEASE_LOST",
-                "reason": "Worker ownership or heartbeat lost; never publish candidate",
-            }
-        finalized = AgentJob.objects.filter(
-            pk=job.pk, status=AgentJob.Status.RUNNING
-        ).update(status=status, result=result, finished_at=timezone.now())
-        # Another operator may have explicitly recovered the worker meanwhile.
-        # Never turn that recovered BLOCKED job back into PASS/PROPOSED.
-        if finalized:
-            record(job, "final_gate", status, {
-                "failure_class": result.get("failure_class", ""),
-                "candidate_only": bool(result.get("candidate_only", False)),
-            })
-        else:
-            # A recovered worker must not append new events after the operator
-            # has fenced its result. The recovery event is the terminal evidence.
-            pass
+        from .job_finalization import finish_if_owner
+        finish_if_owner(
+            job, token=token, heartbeat=heartbeat, status=status, result=result
+        )
     job.refresh_from_db()
     return job
