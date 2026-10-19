@@ -59,3 +59,28 @@ Django 业务测试；`--include-autonomous` 还需要人工审批和全局授�
 如要提交 AUTONOMOUS 任务，需要全局开关、项目开关、干净的 Git 工作树、
 任务权限 YAML 和独立业务测试策略都满足限制；审批仅授权生成待审补丁。
 模板与测试都不声明已经满足生产级隔离或真实 DeepSeek 三轮稳定性验收。
+
+
+## V0.4：Docker Worker 安全验证
+
+先从本分支安装依赖，再预先构建 Docker 验证镜像：
+```bash
+python -m pip install -e ".[django]"
+docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+python examples/django_host/manage.py process_agentforge_queue --max-jobs 2 --include-verify
+```
+
+VERIFY 默认只允许 Docker 离线容器运行 `python manage.py check/test`；
+镜像没准备好时会 BLOCKED，不会退回主机执行。被测试代码仅访问临时副本，
+不能获得宿主机生产数据库、Docker socket 或 DeepSeek API 密钥。
+需根据实际项目预装受信任的 Python 依赖镜像，不能让不可信项目在验证时安装软件。
+
+**AUTONOMOUS 在 V0.4 默认阻断**，因为原核心中的代码生成期测试尚未完全
+移入受控容器；单纯对生成结果做 Docker 测试不等于全链路安全。
+确需在封闭、可信的开发环境使用旧模式，见安全设计文档中的危险开关。
+
+真实 DeepSeek **只读策略 3/3** 入口：手动触发
+`agentforge-django-v04-live.yml`，先配置 Actions Secret / Variables。
+此入口不是完整自治编码 3/3，未运行不可声称 PASS。
+
+细节与局限：[docs/DJANGO_AGENT_MANAGER.md](docs/DJANGO_AGENT_MANAGER.md)。

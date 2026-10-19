@@ -1,4 +1,4 @@
-# AgentForge Django Agent Manager V0.3
+# AgentForge Django Agent Manager V0.4
 
 ## Positioning
 
@@ -30,9 +30,9 @@ Do not call the runner from a web request.
   project code or runs manage.py. Optional AGENTFORGE_READONLY_LLM=True provides a
   non-binding DeepSeek planning report based on sanitized metadata only. This is a
   **static audit**, not a behavioral PASS.
-- VERIFY: disposable copy, then independent Django system checks and business tests
+- VERIFY: offline Docker disposable copy (V0.4 default), then Django system checks and business tests
   (run_business_tests=True default). No source workspace modifications.
-- AUTONOMOUS: **OFF by default** and requires global setting, project setting,
+- AUTONOMOUS: **OFF by default** (V0.4 also blocks legacy host execution by default) and requires global setting, project setting,
   immutable human approval tied to current git HEAD and exact write scopes, a clean
   trusted Git repository, and a .agent/execution-profiles.yaml policy.
   It delegates planner/executor/reviewer/limited repair to existing V2.0 core, then
@@ -219,3 +219,104 @@ must PASS before classifying V0.3 as a tested development build.
 
 No paid DeepSeek 3/3 stability testing, production service-level verification, or
 secure hostile-code container isolation is claimed in V0.3.
+
+
+## V0.4 — Docker verification, protected worker, 3-round REAL model gate
+
+### Purpose, implementation boundary
+
+V0.4 separates the trusted Django control plane (Admin, DB, approvals, queue) from
+untrusted Django test execution. `AGENTFORGE_VERIFICATION_BACKEND="docker"` is
+the DEFAULT, and the Worker invokes `docker run` with **only a disposable copy**
+of target source. No Docker socket, secrets, home directories, original project
+folder or production database are mounted into the verifier.
+
+The trusted queue process still runs as a separate host process / dedicated
+worker VM with Docker Engine access. NEVER mount `/var/run/docker.sock` into
+the public Django Web container: controlling the Docker daemon is approximately
+equivalent to host root privilege. Restrict Docker control to dedicated operators.
+
+### Setup (one-time)
+
+```bash
+docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+python examples/django_host/manage.py process_agentforge_queue --max-jobs 2 --include-verify
+```
+
+The Docker verifier image must already be installed locally. Verification
+never downloads an image during task execution (`--pull never`). For a real
+Django project, build a vetted custom verifier image with ALL test dependencies
+preinstalled, run as uid 65534, and configure
+`AGENTFORGE_DOCKER_VERIFY_IMAGE="your-verifier:immutable-version"`. Use digest
+pinning and regularly scan base images in production. This template is a
+development proof of the executor contract only.
+
+`docker run` receives:
+- `--network none`, `--read-only`, `--cap-drop ALL`,
+  `--security-opt no-new-privileges`, `--pids-limit 128`,
+  `--memory 768m`, `--cpus 1.0`, `--user 65534:65534`,
+  temporary `/tmp` and `/run` tmpfs mounts.
+- exactly one disposable bind mount to `/workspace`, never the original
+  project, and only fixed `python manage.py check/test` commands.
+- no inherited LLM API keys, secret environment, Docker socket, public network,
+  deployment credentials, privileged mode or host production databases.
+
+Missing Docker daemon/image, malformed input, timeout, failed check, zero Django
+business tests, or unavailable dependencies => BLOCKED/FAIL, never PASS.
+An explicit **unsafe legacy local** verification switch exists only for
+trusted development:
+```python
+AGENTFORGE_VERIFICATION_BACKEND = "local"
+AGENTFORGE_ALLOW_UNSAFE_LOCAL_VERIFY = True
+```
+**Do not use this legacy mode for external code or production.**
+
+### Autonomous coding safety
+
+The original AgentForge V2.0 coding pipeline still launches verifier subprocesses
+in its own process. A Docker *post*-verification alone cannot make that earlier
+execution safe. Therefore V0.4 **blocks AUTONOMOUS by default**, even when a
+human has authorized write scope, until a separate isolated coding executor
+and constrained LLM broker are implemented.
+
+An explicit legacy trusted-development fallback exists, requiring ALL of:
+`AGENTFORGE_ENABLE_LEGACY_HOST_AUTONOMOUS=True`,
+`AGENTFORGE_VERIFICATION_BACKEND="local"`,
+`AGENTFORGE_ALLOW_UNSAFE_LOCAL_VERIFY=True`, plus the original human approval
+and model policy gates. This mode is **not secure against untrusted code** and
+is not production-ready.
+
+### REAL DeepSeek 3-round gate
+
+A workflow_dispatch-only `.github/workflows/agentforge-django-v04-live.yml`
+calls DeepSeek three separate times with a fixed read-only policy fixture. Each
+round is independently checked against deterministic policy invariants: an
+unauthorized settings change must be BLOCKED and independent business tests
+are necessary. All three must PASS or overall FAIL; 429/5xx/network/model
+failures do not count as success. The job writes a machine-readable JSON report
+and returns a nonzero exit code on failure.
+
+Configure Github Actions secret `AGENTFORGE_LLM_API_KEY` and variables
+`AGENTFORGE_LLM_BASE_URL`, `AGENTFORGE_LLM_MODEL`; manually dispatch the
+workflow. Without credentials it returns BLOCKED. This costs API usage and
+is NOT automatically started by source push.
+
+**This is a read-only model-policy gate**, not V2.0 full autonomous coding 3/3,
+not integration of a real customer's business transaction tests, and not
+production readiness. Never label offline fake-model tests as real DeepSeek
+acceptance. Paid live results must include the actual run link and 3/3 counts.
+
+### Security scope and remaining work
+
+Docker shares the host kernel and Docker control is highly privileged. This
+implementation is defense-in-depth for trusted projects on a dedicated Linux
+worker, not isolation for active adversarial code or multitenant production.
+Do not run user-supplied projects without a separately locked-down VM/microVM,
+strict image provenance, resource quotas, rate limits, read-only control DB
+credentials where possible and review of data exfiltration channels (especially
+stdout and test fixtures). Temporary worktree creation excludes common secret
+names, but file naming conventions cannot guarantee all secret data is removed.
+
+NEXT GATE: isolated AUTO-CODING executor, external LLM broker with strict
+token/cost/time budgets, supported independent business harness and 3/3 actual
+code-generation rounds. Until that gate, V0.4 is a development framework.

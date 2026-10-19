@@ -76,7 +76,11 @@ class JobTests(TestCase):
             "utf-8",
         )
         job = AgentJob.objects.create(project=self.project, mode=AgentJob.Mode.VERIFY)
-        self.assertEqual(run_job(job.pk).status, AgentJob.Status.FAIL)
+        with override_settings(
+            AGENTFORGE_VERIFICATION_BACKEND="local",
+            AGENTFORGE_ALLOW_UNSAFE_LOCAL_VERIFY=True,
+        ):
+            self.assertEqual(run_job(job.pk).status, AgentJob.Status.FAIL)
         self.assertFalse((self.root / "sandbox_marker.txt").exists())
         self.assertTrue(verify_chain(job))
 

@@ -34,6 +34,18 @@ def _git(root, *args, timeout=30):
 
 
 def _autonomous(job, root):
+    # Legacy Core V2.0 executes agent-generated verification commands in host
+    # subprocesses. It is deliberately OFF by default in V0.4. Docker VERIFY
+    # is safe to use independently, but cannot secure the earlier coding stage.
+    if not (
+        getattr(settings, "AGENTFORGE_ENABLE_LEGACY_HOST_AUTONOMOUS", False)
+        and getattr(settings, "AGENTFORGE_VERIFICATION_BACKEND", "docker") == "local"
+        and getattr(settings, "AGENTFORGE_ALLOW_UNSAFE_LOCAL_VERIFY", False)
+    ):
+        raise BoundaryDenied(
+            "AUTONOMOUS requires a separately isolated coding executor; "
+            "legacy host execution is disabled by default"
+        )
     project = job.project
     if not getattr(settings, "AGENTFORGE_ALLOW_AUTONOMOUS", False):
         raise BoundaryDenied("Global autonomous feature switch is OFF")

@@ -44,3 +44,14 @@ See [README_DJANGO.md](README_DJANGO.md) for a runnable Django host and
 [docs/DJANGO_AGENT_MANAGER.md](docs/DJANGO_AGENT_MANAGER.md) for security gates.
 This version adds staff-readable dashboards and superuser-only intake/approval/
 sanitized evidence endpoints. No autonomous code runs through HTTP endpoints.
+
+
+## V0.4 offline Docker verifier
+
+The Django addon now requires an offline Docker verifier for behavioral tests
+(default, fail closed). Build with:
+`docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .`.
+The previous host autonomous coding path is disabled by default pending a
+secure isolated coding executor. Manual real-model acceptance in
+`.github/workflows/agentforge-django-v04-live.yml` tests only a read-only
+three-round policy fixture; full coding stability is not claimed.
