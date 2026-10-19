@@ -9,7 +9,7 @@ Type=oneshot
 User=agentforge
 Group=agentforge
 WorkingDirectory=/opt/agentforge/AgentForge
-Environment=DJANGO_SETTINGS_MODULE=config.v06_worker_settings
+Environment=DJANGO_SETTINGS_MODULE=config.v07_worker_settings
 EnvironmentFile=/etc/agentforge/v07-worker.env
 ExecStart=/opt/agentforge/venv/bin/python /opt/agentforge/AgentForge/examples/django_host/manage.py process_agentforge_queue --max-jobs 1 --include-autonomous
 NoNewPrivileges=true

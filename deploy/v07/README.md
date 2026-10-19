@@ -56,3 +56,29 @@ multi-tenant isolation; no production-readiness assertion is made.
 To run REAL DeepSeek 3-round synthetic-fixture tests, use the manual
 paid-acceptance script only with an expressly approved API key; success
 on that fixture does NOT prove a real customer's Django project.
+
+
+## Production deployment settings (new V0.7 fail-closed example)
+
+The systemd unit now uses `config.v07_worker_settings` instead of the
+V0.6 SQLite demo. It REFUSES to start until:
+
+- `AGENTFORGE_V07_PRODUCTION_WORKER_CONFIRM=I_DEPLOY_IN_DEDICATED_VM`;
+- `AGENTFORGE_V06_ENABLE_WORKER=I_ACCEPT_DEDICATED_WORKER`,
+  `AGENTFORGE_WORKER_ROLE=trusted-dedicated`;
+- a strong `DJANGO_SECRET_KEY` and explicit `AGENTFORGE_ALLOWED_ROOTS`;
+- external `AGENTFORGE_PG_HOST`, `_NAME`, `_USER`, `_PASSWORD`;
+- `AGENTFORGE_PG_SSLMODE=verify-full` and a valid local CA cert file at
+  `AGENTFORGE_PG_SSLROOTCERT` (no localhost or plaintext fallback).
+
+For the public Django web host, `config.v07_control_settings` reuses the
+same verified remote DB but keeps all autonomous execution flags disabled.
+It requires HTTPS reverse proxy, `AGENTFORGE_WEB_ALLOWED_HOSTS`,
+and contains NO LLM API key or Docker socket. It may only queue/approve.
+**Both hosts must refer to the same Git revision and provide a trustworthy
+read-only view of the approved project source** for initial Git approval and
+worker execution. This synchronization is not automated in this repo;
+do not claim a production rollout without verifying it.
+
+The supplied one-shot systemd timer is deliberately not enabled by CI.
+It cannot establish container/VM security just by setting environment flags.

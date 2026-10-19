@@ -214,3 +214,13 @@ Actions 的临时 Ubuntu Runner 上启动 PostgreSQL 和 Django 控制端，
 真实 DeepSeek 三轮测试仍需要显式授权和可用 API Key。
 开发分支默认不自动付费、不伪造结果。GitHub 现阶段只开放
 合成模型的临时 staging 验收。
+
+
+### V0.7 安全部署示例补充
+
+提供 `config.v07_control_settings` 和 `config.v07_worker_settings`
+两个独立 settings，均要求 **远程 PostgreSQL + TLS verify-full + 可信 CA**。
+systemd 服务模板现在默认引用 `v07_worker_settings`，缺少数据库
+环境变量会直接失败，不再偷偷使用本机 SQLite。
+这两份设置是部署准备文件，仍然需要用户已有的 VM、远程数据库、
+证书和网络访问控制才能真正启动常驻服务。

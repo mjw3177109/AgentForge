@@ -506,3 +506,17 @@ Its explicit synthetic-only gate prevents accidental use as a real worker.
 The paid 3-round DeepSeek acceptance remains separate and is not run by default.
 Never treat fake-agent staging pass as real-model 3/3 reliability. See
 `deploy/v07/README.md` for service deployment and approval prerequisites.
+
+
+### V0.7 persistent deployment safety correction
+
+`config.v07_worker_settings` now requires a verified-TLS PostgreSQL
+connection, dedicated-VM confirmation, and inherited V0.6 worker gates.
+`config.v07_control_settings` requires the same externally hosted DB
+and has LLM source-transfer/worker flags forcibly OFF, and requires HTTPS
+session/CSRF cookies. The `deploy/v07/agentforge-worker.service` template
+points to `v07_worker_settings`, not demo SQLite. Missing remote TLS CA,
+DB secrets, role marker or permission roots causes settings import to fail.
+
+The code is deployable configuration, NOT a claim that a remote VM,
+PostgreSQL service or live DeepSeek integration has already been provisioned.
