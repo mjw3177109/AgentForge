@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentForge · Django</title>
+<style>body{font:15px/1.5 system-ui,sans-serif;background:#f7f8fa;color:#18212f;max-width:1080px;margin:40px auto;padding:0 20px}table{width:100%;border-collapse:collapse;background:white}td,th{text-align:left;padding:12px;border-bottom:1px solid #e5e7eb}h1{font-size:25px}a{color:#2463ce}.hint{color:#68758b}</style></head>
+<body><h1>AgentForge · Django 辅助管理</h1>
+<p class="hint">默认只读。所有任务由受控管理命令执行，生产发布始终人工审批。</p>
+<p><a href="/admin/agentforge_django/">进入 Django Admin 配置项目、任务与授权</a></p>
+<h2>项目</h2><table><tr><th>项目</th><th>启用</th><th>自治权限</th></tr>
+{% for p in projects %}<tr><td>{{ p.name }}</td><td>{{ p.enabled }}</td><td>{{ p.autonomous_enabled }}</td></tr>
+{% empty %}<tr><td colspan="3">暂无项目</td></tr>{% endfor %}</table>
+<h2>任务</h2><table><tr><th>ID</th><th>项目</th><th>模式</th><th>状态</th></tr>
+{% for j in jobs %}<tr><td><a href="/admin/agentforge_django/agentjob/{{ j.pk }}/change/">{{ j.pk }}</a></td><td>{{ j.project.name }}</td><td>{{ j.mode }}</td><td>{{ j.status }}</td></tr>
+{% empty %}<tr><td colspan="4">暂无任务</td></tr>{% endfor %}</table>
+</body></html>
