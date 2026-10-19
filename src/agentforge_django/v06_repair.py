@@ -44,10 +44,9 @@ class Budget:
         client.v12_role_trace.append(event)
         try:
             value = _call(client, role, instruction, schema)
-        except Exception as exc:
+        except Exception:
+            # Only a bounded role/state is retained, never exception payloads.
             event["status"] = "ERROR"
-            # No exception messages, prompts, or model text in persisted reports.
-            event["error_type"] = type(exc).__name__[:64]
             raise
         event["status"] = "SCHEMA_ACCEPTED"
         return value
