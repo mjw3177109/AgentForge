@@ -62,6 +62,11 @@ class CodingPipelineTests(SimpleTestCase):
             )
         validator.assert_not_called()
 
+    def test_test_module_inside_approved_app_scope_is_protected(self):
+        from agentforge_django.v05_coding import _safe_python
+        with self.assertRaises(BoundaryDenied):
+            _safe_python(self.root, "app/tests.py", ["app/**"])
+
     def test_business_failure_cannot_be_proposed(self):
         failed = {
             "backend": "docker-offline", "passed": False,

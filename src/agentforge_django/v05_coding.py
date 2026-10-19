@@ -46,9 +46,13 @@ def _safe_python(root, rel, ceilings):
         raise BoundaryDenied("V0.5 can edit only existing Python source files")
     parts = Path(rel).parts
     if (
-        "migrations" in parts or "settings" in parts
-        or Path(rel).name in {"manage.py", "settings.py", "conftest.py"}
-        or Path(rel).name.startswith("test_")
+        any(part.lower() in {"migrations", "settings", "tests", "test", "specs"} for part in parts)
+        or Path(rel).name.lower() in {
+            "manage.py", "settings.py", "conftest.py", "tests.py",
+            "test.py", "production.py", "wsgi.py", "asgi.py",
+        }
+        or Path(rel).name.lower().startswith("test_")
+        or Path(rel).name.lower().endswith("_test.py")
         or not any(scope_within(rel, [scope]) for scope in ceilings)
     ):
         raise BoundaryDenied("V0.5 target is protected or outside approved source scope")
