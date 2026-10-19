@@ -60,7 +60,13 @@ jobs:
               --input artifacts/django-v11/offline-report.json \
               --output artifacts/django-v11/operator-summary.md
           fi
-      - name: Archive V1.2 case evidence and operator summary
+      - name: V1.4 verify three-case fixture hashes and benchmark claim
+        run: |
+          python scripts/verify_django_v14_evidence.py \
+            --input artifacts/django-v11/offline-report.json \
+            --output artifacts/django-v11/v14-evidence-receipt.json \
+            --expected-model SCRIPTED_FAKE_AGENT --require-pass
+      - name: Archive V1.4 validated offline case evidence and operator summary
         if: always()
         uses: actions/upload-artifact@v4
         with:

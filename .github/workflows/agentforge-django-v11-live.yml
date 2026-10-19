@@ -42,6 +42,15 @@ jobs:
               --input artifacts/django-v11-live/report.json \
               --output artifacts/django-v11-live/operator-summary.md
           fi
+      - name: V1.4 verify integrity of reported real-model benchmark
+        if: always()
+        run: |
+          if [ -f artifacts/django-v11-live/report.json ]; then
+            python scripts/verify_django_v14_evidence.py \
+              --input artifacts/django-v11-live/report.json \
+              --output artifacts/django-v11-live/v14-evidence-receipt.json \
+              --expected-model REAL_DEEPSEEK
+          fi
       - name: Archive redacted per-case evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4

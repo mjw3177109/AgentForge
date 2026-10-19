@@ -484,3 +484,43 @@ GitHub Actions 额外保留 Markdown 人工审查摘要。
 不是可独立验证的远程模型身份/消费证明。只有对应的 GitHub
 执行日志和服务商账单/用量信息，才能进一步佐证实际 API 调用。
 即使真实三案例 3/3，也不能据此认定已通过任意生产项目或恶意代码隔离测试。
+
+
+## V1.4 — 独立验收证据一致性检查
+
+本阶段先修复 V1.3 GitHub CI 的旧断言：
+`tests/test_v11_cli.py` 过去错误地要求付费 workflow 必须包含
+`paths:`。V1.3 已主动移除 push 触发，所以该测试现在明确要求
+**只能 workflow_dispatch 且绝不包含 push 触发**。这保持了更安全的
+“默认不产生费用”控制，不做回退。
+
+新增：
+- `src/agentforge_django/v14_evidence.py`：复核 3 个基准场景顺序、
+  固定 manifest 指纹、源文件和测试文件的 SHA-256、实际测试数、
+  模型角色请求数、单例/总体 PASS 一致性、token 来源标记和
+  部署权限默认关闭；
+- `scripts/verify_django_v14_evidence.py`：只读本地 JSON，
+  不联网、不启动 Docker、不调用付费模型；输出原子写入且
+  默认权限 0600 的 `v14-evidence-receipt.json`；
+- `django_tests/test_v14_evidence.py`：包含伪造模型标签、
+  篡改测试数、修改原测试文件指纹、虚报调用次数和
+  伪造生产发布授权等拒绝用例。
+
+运行命令（先要有 V1.2 的实际 JSON 报告）：
+~~~bash
+python scripts/verify_django_v14_evidence.py \
+  --input artifacts/django-v11/offline-report.json \
+  --output artifacts/django-v11/v14-evidence-receipt.json \
+  --expected-model SCRIPTED_FAKE_AGENT --require-pass
+~~~
+
+真实 DeepSeek 手动工作流亦加入同一校验器，输出额外回执；付费
+三案例运行依旧需要管理员明确配置密钥及授权变量才能触发，
+本次**没有进行任何付费模型调用**。
+
+**验收边界：** 这是“同一仓库中生成的报告和预置基准是否自洽”的
+校验，不是第三方签名，不是服务商身份或 API 消费的独立证明。
+操作者若能同时改写报告和校验器，SHA-256 不能阻止其伪造。
+验证真实 DeepSeek 使用情况仍需对照对应 GitHub Actions
+运行记录、API 服务商用量账单及可信执行环境。也不是已完成
+持久 VM 生产部署或对抗性沙箱安全认证。
