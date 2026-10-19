@@ -82,7 +82,7 @@ class AuditEvent(models.Model):
     job = models.ForeignKey(AgentJob, on_delete=models.CASCADE, related_name="events")
     sequence = models.PositiveIntegerField()
     phase = models.CharField(max_length=40)
-    decision = models.CharField(max_length=24)
+    decision = models.CharField(max_length=64)
     detail = models.JSONField(default=dict)
     previous_hash = models.CharField(max_length=64, blank=True)
     event_hash = models.CharField(max_length=64)
