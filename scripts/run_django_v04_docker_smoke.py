@@ -3,7 +3,10 @@
 import json
 import os
 import tempfile
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "django_tests.settings")
 import django
