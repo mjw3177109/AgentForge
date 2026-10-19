@@ -140,3 +140,51 @@ python scripts/run_django_v05_live_acceptance.py --confirm-paid-calls
 `artifacts/django-v05-live/summary.json`。
 此验收默认**不会运行**，没有 API Key 时不伪造结果。
 它只证明合成案例，不证明实际业务项目达到 3/3 生产稳定性。
+
+
+## V0.6 — 一次受限自愈 + 独立 Worker
+
+V0.6 在 V0.5 受限编码路径上增加最多一轮自动修复：
+
+```text
+Planner → Executor → Reviewer → Docker check/test
+                                     │
+                                   失败
+                                     ↓
+                       Fixer（仅已有获批 Python 文件）
+                                     ↓
+                             Reviewer（再次审核）
+                                     ↓
+                          Docker check/test（再次独立验证）
+                                     ↓
+                          候选补丁 PROPOSED / FAIL
+```
+
+V0.6 每个任务最多 5 次模型角色请求、2 轮 Docker 验证、1 次修复。
+Docker 命令固定，单条检查最长 90 秒；不会把原始测试日志或密钥
+发送给 Fixer。实际货币费用没有测量，因此不能将其称为“人民币上限”。
+
+默认所有 V0.6 开关仍为关闭：
+`AGENTFORGE_V06_BOUNDED_REPAIR=False`、
+`AGENTFORGE_V06_DEDICATED_WORKER=False`。开启需要原 V0.5 所有开关、
+明确的项目人工审批和独立的可信 Worker 进程，并设置
+`AGENTFORGE_WORKER_ROLE=trusted-dedicated`；该角色标记不能代替真正的 VM 隔离。
+
+本地离线全闭环验收（脚本中模型是 Fake，但 Docker 检查是真的）：
+```bash
+docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+python scripts/run_django_v06_smoke.py
+```
+
+需向真实 DeepSeek API 支付费用的独立三轮合成样本测试：
+```bash
+python scripts/run_django_v06_live_acceptance.py --confirm-paid-calls
+```
+此命令默认不会由 push 自动启动。工作流文件
+`.github/workflows/agentforge-django-v06-live.yml` 为手动入口，
+可能需要存在于默认 GitHub 分支才可以触发，但我们尚未修改 `main`。
+
+可信 Worker 的**演示配置**在
+`examples/django_host/config/v06_worker_settings.py`，
+独立 VM 配置、数据库及权限要求见 `deploy/v06/README.md`。
+**它不是已部署的安全多租户 Worker**，不能给公开用户任意提交代码执行。

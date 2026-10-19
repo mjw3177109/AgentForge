@@ -39,3 +39,8 @@ AGENTFORGE_ENABLE_LEGACY_HOST_AUTONOMOUS = False
 AGENTFORGE_V05_ISOLATED_AUTONOMOUS = False
 AGENTFORGE_V05_ENABLE_SOURCE_TRANSFER = False
 AGENTFORGE_V05_ALLOWED_LLM_HOSTS = ("api.deepseek.com",)
+
+# V0.6 bounded repair requires all original V0.5 gates AND a dedicated worker.
+# Marker is operational hygiene, not a security sandbox.
+AGENTFORGE_V06_BOUNDED_REPAIR = False
+AGENTFORGE_V06_DEDICATED_WORKER = False

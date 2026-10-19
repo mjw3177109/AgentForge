@@ -95,6 +95,11 @@ def job_detail(request, job_id):
         "independent_checks": checks.get("checks", []) if isinstance(checks, dict) else [],
         "patch_hash": job.result.get("patch_sha256", ""),
         "patch_available": bool(job.result.get("candidate_patch")),
+        "v06_budget": job.result.get("budget", {})
+            if isinstance(job.result.get("budget"), dict) else {},
+        "v06_repair_attempts": job.result.get("repair_attempts"),
+        "v06_rounds": job.result.get("rounds", [])
+            if isinstance(job.result.get("rounds"), list) else [],
         "approval": approval,
         "can_approve": can_approve,
         "approval_form": ApprovalForm(),

@@ -63,3 +63,11 @@ A new optional Django coding path performs bounded typed Planner/Executor/
 Reviewer calls and independent offline Docker test verification. The old host
 subprocess coding executor remains closed by default, and production deployment
 remains an explicit human-only action. See README_DJANGO.md.
+
+
+## V0.6 one-repair candidate flow (opt-in)
+
+The additive Django layer now limits model-driven candidate changes to
+one reviewable repair, at most five role requests and two independent offline
+Docker validation rounds. It includes worker-only settings and audit metrics,
+all OFF by default. See `README_DJANGO.md` and `deploy/v06/README.md`.

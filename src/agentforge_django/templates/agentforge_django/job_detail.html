@@ -40,6 +40,26 @@
 <p class="help">审批前将验证 Git HEAD、工作树清洁、执行配置及写入白名单。</p>
 {% else %}<p class="muted">未审批、无需审批或当前状态不允许审批。</p>{% endif %}
 </section></div>
+{% if v06_budget %}
+<section class="panel"><div class="panel-header"><h2>V0.6 有界修复账本</h2></div>
+<div class="grid-2"><div>
+<div class="fact"><span class="fact-name">角色请求数</span>
+<strong>{{ v06_budget.role_requests }} / {{ v06_budget.max_role_requests }}</strong></div>
+<div class="fact"><span class="fact-name">Docker 独立验证轮数</span>
+<strong>{{ v06_budget.docker_verification_rounds }} / {{ v06_budget.max_docker_rounds }}</strong></div>
+</div><div>
+<div class="fact"><span class="fact-name">自动修复次数</span>
+<strong>{{ v06_repair_attempts }}</strong></div>
+<div class="fact"><span class="fact-name">账单金额</span>
+<strong>未测量（非费用硬上限）</strong></div>
+</div></div>
+<div class="table-wrap"><table><thead><tr><th>轮次</th><th>独立 Reviewer</th><th>Docker</th></tr></thead>
+<tbody>{% for step in v06_rounds %}<tr><td>{{ step.attempt }}</td>
+<td>{{ step.review }}</td>
+<td>{% if step.verification.passed %}<span class="pill pass">PASS</span>{% else %}
+<span class="pill fail">FAIL / NOT_RUN</span>{% endif %}</td></tr>
+{% empty %}<tr><td colspan="3" class="empty">暂无执行证据</td></tr>{% endfor %}
+</tbody></table></div></section>{% endif %}
 <section class="panel"><div class="panel-header"><h2>独立验证</h2></div>
 <div class="table-wrap"><table><thead><tr><th>验证执行</th><th>结果</th></tr></thead><tbody>
 {% for check in independent_checks %}<tr>

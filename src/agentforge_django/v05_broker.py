@@ -16,6 +16,13 @@ from agentforge.runtime_config import ExternalLLMSettings
 from .guard import BoundaryDenied
 
 
+class _DenyRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward model-provider credentials to a redirected origin."""
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
 class BoundedDeepSeek(OpenAICompatibleClient):
     def __init__(self, *, api_key, base_url, model, max_requests=3, seconds=150):
         super().__init__(
@@ -54,7 +61,8 @@ class BoundedDeepSeek(OpenAICompatibleClient):
         if remaining <= 0:
             raise BoundaryDenied("V0.5 model wall-time limit exceeded")
         try:
-            with urllib.request.urlopen(
+            opener = urllib.request.build_opener(_DenyRedirect)
+            with opener.open(
                 request, timeout=min(30, remaining)
             ) as response:
                 bounded = response.read(128001)

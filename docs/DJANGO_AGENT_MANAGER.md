@@ -1,4 +1,4 @@
-# AgentForge Django Agent Manager V0.5
+# AgentForge Django Agent Manager V0.6
 
 ## Positioning
 
@@ -412,3 +412,71 @@ We do not modify `main` in this development branch.
 This test **does not prove** 3/3 reliability on real customer Django apps,
 secure execution against hostile code, actual monetary spend, or suitability
 for deployment. No model-generated output is merged or pushed automatically.
+
+
+## V0.6 — bounded repair, telemetry, external-worker preflight
+
+### Code delivery loop and deterministic ceiling
+
+The new optional `v06_repair.produce_candidate_v06` is selected inside
+`run_approved_v05` ONLY when `AGENTFORGE_V06_BOUNDED_REPAIR=True`.
+All original V0.5 gates continue to apply: explicit human approved Git SHA,
+unchanged requirement/configuration, project + global allowlists, approved
+source transfer, and Docker validation only.
+
+Its flow: Planner → Executor → Reviewer → Docker check/test.
+On a real failed check/test, at most once, Fixer returns a restricted
+full-file edit for an already planned Python path, followed by a NEW Reviewer
+and NEW independent Docker check/test. Blocked or infrastructure failures do
+not trigger repair. Reviewer rejection means BLOCKED, not PASS.
+
+Per-task limits: **5 role calls**, **2 Docker validation rounds**, **1 repair**,
+a 150s trusted model broker deadline, maximum 2048 model output tokens per API
+request, and 90-second timeout per fixed Django check/test subprocess.
+These ceilings are bounded operations, not an audited total USD budget.
+Task timing including process cleanup/daemon failures is not an OS-enforced
+hard deadline. Any missing required evidence returns blocked/failed.
+
+The Fixer only gets sanitized status (PASS/FAIL, allowlisted short failure reason,
+numeric return code) and the prior candidate diff. Target stdout/stderr and
+secrets are NOT inserted in its prompt. Models cannot change tests,
+settings, migrations or run unapproved commands. The original Git directory
+is never modified by this additive pipeline. A successful outcome is a
+candidate patch only; human promotion remains external.
+
+### Distinct trusted Worker
+
+`examples/django_host/config/v06_worker_settings.py` fails closed unless:
+- operator sets `AGENTFORGE_V06_ENABLE_WORKER=I_ACCEPT_DEDICATED_WORKER`
+  and `AGENTFORGE_WORKER_ROLE=trusted-dedicated`;
+- an explicit source-root allowlist and a non-demo Django secret exist.
+
+Use on a separate trusted host with the ability to invoke Docker; do not
+mount a Docker socket into the public Django container or assume role
+environment markers provide kernel-level isolation. A separate VM and
+dedicated database credentials are deployment responsibilities, **not
+included in this reference implementation**.
+Read `deploy/v06/README.md` for the deployment boundary and the one-pass
+queue command. The demo SQLite DB is not suitable for a shared remote
+worker.
+
+### Evidence and acceptance honesty
+
+The Control Center now shows model call counts, Docker rounds, repair
+attempts and per-round outcome. Authorized JSON evidence export includes
+bounded numeric budget fields and no raw candidate code/stdout/stderr.
+
+`python scripts/run_django_v06_smoke.py` runs THREE distinct synthetic
+coding loops. Every loop starts with an actual failing Django fixture;
+the scripted initial fix still fails in real Docker; a scripted Fixer then
+corrects it; a fresh Reviewer and a second independent real Docker check
+must PASS. The original source remains unchanged. Evidence MUST be named
+`SYNTHETIC_AGENT_REAL_DOCKER_V06`, never real DeepSeek 3/3.
+
+`python scripts/run_django_v06_live_acceptance.py --confirm-paid-calls`
+is the separate opt-in paid real DeepSeek 3-cycle entrypoint. It requires
+3/3 candidate deliveries with independent Docker evidence on the fixed
+synthetic fixture. It does not claim production customer project reliability,
+provable monetary limits or secure hostile-code isolation. The manual GitHub
+workflow cannot necessarily dispatch until placed in the default branch,
+which this implementation does NOT modify.

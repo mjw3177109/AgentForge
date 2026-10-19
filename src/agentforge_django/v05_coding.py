@@ -223,6 +223,20 @@ def run_approved_v05(job, source_root, *, broker=None):
         raise BoundaryDenied("Target branch changed after approval")
     # Do not execute any agent-configured verification command or untrusted
     # profile; V0.5 has an independent, fixed Docker validation gate.
+    if getattr(settings, "AGENTFORGE_V06_BOUNDED_REPAIR", False):
+        # The flag and role marker prevent accidental web-worker use.
+        # They DO NOT substitute for OS isolation in a dedicated VM.
+        import os
+        if not getattr(settings, "AGENTFORGE_V06_DEDICATED_WORKER", False):
+            raise BoundaryDenied("V0.6 requires an expressly configured dedicated worker")
+        if os.getenv("AGENTFORGE_WORKER_ROLE") != "trusted-dedicated":
+            raise BoundaryDenied("V0.6 worker-role marker missing (never execute from web)")
+        if broker is None:
+            broker = create_v05_broker(max_requests=5)
+        from .v06_repair import produce_candidate_v06
+        return produce_candidate_v06(
+            broker, source_root, job.request, approval.approved_scopes
+        )
     if broker is None:
         broker = create_v05_broker()
     return produce_candidate(

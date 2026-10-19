@@ -43,5 +43,15 @@ def export_summary(job):
             "checks": safe_checks,
         },
         "candidate_patch_sha256": result.get("patch_sha256"),
+        "v06_budget": {
+            name: result.get("budget", {}).get(name)
+            for name in (
+                "role_requests", "docker_verification_rounds", "max_role_requests",
+                "max_docker_rounds", "billing_cost_known",
+            )
+            if isinstance(result.get("budget"), dict)
+        },
+        "v06_repair_attempts": result.get("repair_attempts") if
+            type(result.get("repair_attempts")) is int else None,
         "production_release_authorized": False,
     }
