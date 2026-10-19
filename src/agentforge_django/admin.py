@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import AgentJob, AuditEvent, ManagedProject, MutationApproval
+from .models import AgentJob, AuditEvent, JobLease, ManagedProject, MutationApproval
 
 
 @admin.register(ManagedProject)
@@ -34,7 +34,7 @@ class AgentJobAdmin(admin.ModelAdmin):
 @admin.register(MutationApproval)
 class MutationApprovalAdmin(admin.ModelAdmin):
     list_display = ("job", "approved_by", "base_commit", "approved_at")
-    readonly_fields = ("approved_at",)
+    readonly_fields = ("approved_at", "request_sha256", "configuration_sha256")
     exclude = ("approved_by",)
 
     def save_model(self, request, obj, form, change):
@@ -56,6 +56,20 @@ class AuditEventAdmin(admin.ModelAdmin):
     list_filter = ("phase", "decision")
     readonly_fields = ("job", "sequence", "phase", "decision", "detail",
                        "previous_hash", "event_hash", "created_at")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+@admin.register(JobLease)
+class JobLeaseAdmin(admin.ModelAdmin):
+    list_display = ("project", "job", "acquired_at", "owner_token")
+    readonly_fields = ("project", "job", "acquired_at", "owner_token")
 
     def has_add_permission(self, request):
         return False

@@ -85,3 +85,91 @@ class JobTests(TestCase):
         user = get_user_model().objects.create_user("staff", password="test-pass", is_staff=True)
         self.client.force_login(user)
         self.assertEqual(self.client.get("/agentforge/").status_code, 200)
+
+
+class QueueAndRecoveryTests(TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(prefix="af-queue-")
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        (self.root / "manage.py").write_text("print('not called in AUDIT')\n", "utf-8")
+        (self.root / "app.py").write_text("X = 1\n", "utf-8")
+        self.project = ManagedProject.objects.create(
+            name="queue-example", root_path=str(self.root), enabled=True
+        )
+        self.allowed = override_settings(AGENTFORGE_ALLOWED_ROOTS=[str(self.root)])
+        self.allowed.enable()
+        self.addCleanup(self.allowed.disable)
+
+    def test_queue_default_audit_only_and_finite(self):
+        from agentforge_django.queue import process_pending
+        for _ in range(3):
+            AgentJob.objects.create(project=self.project, mode=AgentJob.Mode.AUDIT)
+        verify = AgentJob.objects.create(project=self.project, mode=AgentJob.Mode.VERIFY)
+        result = process_pending(max_jobs=2)
+        self.assertEqual(len(result["processed"]), 2)
+        self.assertEqual(AgentJob.objects.filter(status=AgentJob.Status.PASS).count(), 2)
+        verify.refresh_from_db()
+        self.assertEqual(verify.status, AgentJob.Status.PENDING)
+
+    def test_existing_lease_does_not_steal_or_run(self):
+        from agentforge_django.models import JobLease
+        pending = AgentJob.objects.create(project=self.project)
+        occupying = AgentJob.objects.create(project=self.project, status=AgentJob.Status.RUNNING)
+        lease = JobLease.objects.create(project=self.project, job=occupying)
+        self.assertEqual(run_job(pending.pk).status, AgentJob.Status.PENDING)
+        self.assertEqual(JobLease.objects.get(pk=lease.pk).job_id, occupying.pk)
+        self.assertEqual(pending.events.count(), 0)
+
+    def test_manual_recovery_is_blocked_by_default(self):
+        from agentforge_django.models import JobLease
+        from agentforge_django.recovery import RecoveryDenied, recover_stopped_worker
+        job = AgentJob.objects.create(project=self.project, status=AgentJob.Status.RUNNING)
+        JobLease.objects.create(project=self.project, job=job)
+        with self.assertRaises(RecoveryDenied):
+            recover_stopped_worker(job.pk)
+        self.assertEqual(recover_stopped_worker(
+            job.pk, operator_confirmed=True).status, AgentJob.Status.BLOCKED)
+        self.assertFalse(JobLease.objects.filter(project=self.project).exists())
+        self.assertTrue(verify_chain(job))
+        self.assertEqual(job.result["failure_class"], "INTERRUPTED_OR_ABANDONED_WORKER")
+
+    def test_approval_is_bound_to_request_and_policy(self):
+        from agentforge_django.models import MutationApproval
+        from agentforge_django.approvals import approval_digests
+        staff = get_user_model().objects.create_user(
+            "reviewer-unique", password="test-pass", is_staff=True
+        )
+        self.project.autonomous_enabled = True
+        self.project.write_scopes = ["app/**"]
+        self.project.save()
+        job = AgentJob.objects.create(
+            project=self.project, mode=AgentJob.Mode.AUTONOMOUS, request="Fix app module"
+        )
+        approval = MutationApproval.objects.create(
+            job=job, approved_by=staff, base_commit="0" * 40,
+            approved_scopes=["app/**"], reason="Manual approval for this exact job"
+        )
+        self.assertEqual(
+            (approval.request_sha256, approval.configuration_sha256),
+            approval_digests(job),
+        )
+        job.request = "Modify something else"
+        job.save(update_fields=["request"])
+        from agentforge_django.approvals import approval_digests
+        self.assertNotEqual(approval.request_sha256, approval_digests(job)[0])
+        with override_settings(AGENTFORGE_ALLOW_AUTONOMOUS=True):
+            self.assertEqual(run_job(job.pk).status, AgentJob.Status.BLOCKED)
+        self.assertTrue(verify_chain(job))
+        with self.assertRaises(ValueError):
+            approval.reason = "tampered"
+            approval.save()
+
+    def test_audit_does_not_claim_verified_business(self):
+        from agentforge_django.health import project_health
+        job = AgentJob.objects.create(project=self.project)
+        run_job(job.pk)
+        summary = project_health(self.project)
+        self.assertFalse(summary["verified_business_tests"])
+        self.assertEqual(summary["state"], "AUDIT_ONLY_OR_UNVERIFIED")
+        self.assertEqual(summary["observed_completion_pct"], 100.0)

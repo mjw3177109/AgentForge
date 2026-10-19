@@ -1,4 +1,4 @@
-# AgentForge Django Agent Manager V0.1
+# AgentForge Django Agent Manager V0.2
 
 ## Positioning
 
@@ -107,3 +107,47 @@ AgentForge dashboard and a simple isolated SQLite host DB. It does not change or
 connect to any other project until AGENTFORGE_ALLOWED_ROOTS is explicitly set.
 
 Use this for development / demos only. It is NOT a production-hardened web service.
+
+
+## V0.2 — bounded queue, human recovery, cautious health metrics
+
+New files: `queue.py`, `recovery.py`, `health.py`, `approvals.py`, new management
+commands, new 0002 migration, staff-only dashboard and job details.
+
+Apply migration before running V0.2: `python manage.py migrate agentforge_django`.
+
+Run up to five **AUDIT only** jobs (default):
+```bash
+python manage.py process_agentforge_queue --max-jobs 5
+```
+
+Opt into VERIFY only for trusted code inside an isolated non-production worker:
+```bash
+python manage.py process_agentforge_queue --max-jobs 2 --include-verify
+```
+For AUTONOMOUS, additionally pass `--include-autonomous` and satisfy every explicit
+per-job approval and global safety flag. No autonomous mode is launched by default.
+
+A unique JobLease prevents concurrent task execution in the same registered project.
+If a worker crashes, the lease stays occupied (fail closed). **Only after you
+have separately confirmed/stopped the old worker**, recover manually:
+```bash
+python manage.py recover_agentforge_job <UUID> --confirm-worker-stopped
+```
+Interrupted RUNNING tasks become BLOCKED, never PASS, and must be resubmitted as a
+NEW job. Never run the recovery command while the worker process is still alive.
+
+MutationApproval now stores SHA-256 snapshots of the exact request and project
+configuration; changing a request after approval results in BLOCKED. Older approvals
+migrated from V0.1 have empty snapshots and therefore fail closed; submit a new job
+and create a fresh approval before autonomous execution.
+
+Dashboard 30-day completion rates are simple observed workflow outcomes across
+all modes, **not a model stability estimate or evidence of general code quality**.
+A static AUDIT result cannot establish business correctness; only an independently
+passing VERIFY with business tests may display VERIFIED_TESTS. A zero-test suite
+cannot become PASS.
+
+Release, PR push, original project code mutation and production DB access remain
+outside the V0.2 automation permission boundary. The worker must run in a sandboxed
+VM/container for untrusted target projects. The SQLite demo is for development.

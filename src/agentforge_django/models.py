@@ -64,6 +64,15 @@ class MutationApproval(models.Model):
     approved_scopes = models.JSONField(default=list)
     reason = models.TextField()
     approved_at = models.DateTimeField(auto_now_add=True)
+    request_sha256 = models.CharField(max_length=64, blank=True, default="")
+    configuration_sha256 = models.CharField(max_length=64, blank=True, default="")
+
+    def save(self, *args, **kwargs):
+        if self.pk:
+            raise ValueError("MutationApproval cannot be updated; create a new job")
+        from .approvals import approval_digests
+        self.request_sha256, self.configuration_sha256 = approval_digests(self.job)
+        super().save(*args, **kwargs)
 
     def __str__(self):
         return f"Approval {self.job_id}"
@@ -84,3 +93,17 @@ class AuditEvent(models.Model):
         constraints = [
             models.UniqueConstraint(fields=["job", "sequence"], name="af_dj_job_event_sequence")
         ]
+
+
+class JobLease(models.Model):
+    """Single active worker per project. A crash requires explicit operator recovery."""
+
+    project = models.OneToOneField(
+        ManagedProject, on_delete=models.CASCADE, related_name="worker_lease"
+    )
+    job = models.ForeignKey(AgentJob, on_delete=models.PROTECT, related_name="leases")
+    owner_token = models.UUIDField(default=uuid.uuid4, editable=False)
+    acquired_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"Lease {self.project_id}/{self.job_id}"

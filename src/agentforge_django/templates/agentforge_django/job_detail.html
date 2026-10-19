@@ -1,0 +1,25 @@
+<!doctype html><html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AgentForge · Job {{ job.pk }}</title>
+<style>body{font:15px/1.6 system-ui,sans-serif;color:#1b293d;max-width:980px;margin:40px auto;padding:0 20px;background:#f7f9fc}
+section{padding:16px 20px;background:#fff;border:1px solid #dbe2eb;border-radius:12px;margin:16px 0}
+table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:10px;border-bottom:1px solid #e5e9ef}
+a{color:#245fc2}.hint{color:#63728a}.mono{font-family:monospace;overflow-wrap:anywhere}</style></head>
+<body><a href="{% url 'agentforge_django:dashboard' %}">← 返回项目总览</a>
+<h1>任务详情</h1><section>
+<p><strong>任务 ID：</strong><span class="mono">{{ job.pk }}</span></p>
+<p><strong>项目：</strong>{{ job.project.name }} · <strong>模式：</strong>{{ job.mode }}</p>
+<p><strong>状态：</strong>{{ job.status }} · <strong>事件哈希链：</strong>{% if audit_chain_ok %}校验通过{% else %}校验失败{% endif %}</p>
+{% if failure_class %}<p><strong>失败分类：</strong>{{ failure_class }}</p>{% endif %}
+{% if failure_reason %}<p><strong>原因：</strong>{{ failure_reason }}</p>{% endif %}
+{% if patch_available %}<p><strong>补丁状态：</strong>候选补丁，未发布；仅授权管理员可从受保护存储查询。</p>
+<p><strong>补丁 SHA-256：</strong><span class="mono">{{ patch_hash }}</span></p>{% endif %}
+</section>
+<h2>独立验证</h2><section><table><tr><th>执行命令</th><th>结果</th></tr>
+{% for check in independent_checks %}<tr><td class="mono">{{ check.argv|join:" " }}</td><td>{% if check.success %}PASS{% else %}FAIL{% endif %}</td></tr>
+{% empty %}<tr><td colspan="2">NOT_RUN / 无独立验证证据</td></tr>{% endfor %}</table></section>
+<h2>审计时间线</h2><section><table><tr><th>序号</th><th>阶段</th><th>决策</th><th>时间</th></tr>
+{% for event in events %}<tr><td>{{ event.sequence }}</td><td>{{ event.phase }}</td><td>{{ event.decision }}</td><td>{{ event.created_at }}</td></tr>
+{% empty %}<tr><td colspan="4">暂无事件</td></tr>{% endfor %}</table></section>
+<p class="hint">本页面不执行代码、不提供部署或数据库写入操作。</p>
+</body></html>

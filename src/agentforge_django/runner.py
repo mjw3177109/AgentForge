@@ -1,6 +1,7 @@
 """Synchronous job worker. Execute with management command, never an HTTP handler."""
 
 import hashlib
+import uuid
 import os
 from unittest.mock import patch
 import subprocess
@@ -8,14 +9,16 @@ import tempfile
 from pathlib import Path
 
 from django.conf import settings
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from .audit import record
+from .approvals import approval_digests
 from .guard import (
     BoundaryDenied, checked_root, private_environment, scope_within, scoped_file, validate_write_scopes,
 )
 from .inspection import inspect_python, sanitized_manifest
-from .models import AgentJob
+from .models import AgentJob, JobLease
 from .planning import advisor
 from .verification import isolated_verification
 
@@ -47,6 +50,9 @@ def _autonomous(job, root):
         raise
     if not approval.approved_by.is_staff or not approval.approved_by.is_active:
         raise BoundaryDenied("Approval must be from an active staff member")
+    expected_request, expected_config = approval_digests(job)
+    if approval.request_sha256 != expected_request or approval.configuration_sha256 != expected_config:
+        raise BoundaryDenied("Approved request or project settings changed; new approval required")
     permitted = validate_write_scopes(project.write_scopes)
     approved = validate_write_scopes(approval.approved_scopes)
     if permitted != approved:
@@ -141,14 +147,32 @@ def _autonomous(job, root):
 
 
 def run_job(job_id):
-    """Idempotent claim: a pending job can be picked up only once."""
-    claimed = AgentJob.objects.filter(pk=job_id, status=AgentJob.Status.PENDING).update(
-        status=AgentJob.Status.RUNNING, started_at=timezone.now(),
-    )
+    """Claim one project-wide lease before RUNNING; never execute concurrent project jobs."""
     job = AgentJob.objects.select_related("project").get(pk=job_id)
-    if not claimed:
+    if job.status != AgentJob.Status.PENDING:
         return job
+    token = uuid.uuid4()
+    try:
+        with transaction.atomic():
+            JobLease.objects.create(project=job.project, job=job, owner_token=token)
+    except IntegrityError:
+        # An existing lease means another worker owns this project.
+        # Leave the job pending; never silently steal a lease.
+        return job
+    try:
+        claimed = AgentJob.objects.filter(
+            pk=job.pk, status=AgentJob.Status.PENDING
+        ).update(status=AgentJob.Status.RUNNING, started_at=timezone.now())
+        if not claimed:
+            job.refresh_from_db()
+            return job
+        return _run_claimed_job(job)
+    finally:
+        JobLease.objects.filter(project=job.project, owner_token=token).delete()
 
+
+def _run_claimed_job(job):
+    """Finalize status and audit even if the execution fails."""
     status, result = AgentJob.Status.BLOCKED, {}
     try:
         record(job, "intake", "CLAIMED", {"mode": job.mode})
@@ -172,6 +196,8 @@ def run_job(job_id):
             record(job, "reviewer", "PASS", {"static_findings": len(manifest["findings"])})
             status = AgentJob.Status.PASS
         elif job.mode == AgentJob.Mode.VERIFY:
+            if not job.project.run_business_tests:
+                raise BoundaryDenied("Business tests are disabled; VERIFY cannot prove behavior")
             independent = isolated_verification(
                 root, with_tests=job.project.run_business_tests,
             )
