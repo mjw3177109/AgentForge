@@ -8,6 +8,7 @@ import json
 import re
 
 from .v11_benchmark import SCENARIOS, suite_fingerprint
+from .v15_consistency import check_model_telemetry, check_suite_telemetry
 
 
 class EvidenceRejected(ValueError):
@@ -82,6 +83,7 @@ def verify_benchmark(report, *, expected_model):
                     or case.get("status") != "PASS",
                     "Passing real case lacks trusted Broker")
 
+        check_model_telemetry(case, expected_model, _assert)
         if case["status"] != "PASS":
             continue
         passes += 1
@@ -139,6 +141,7 @@ def verify_benchmark(report, *, expected_model):
         _assert(metrics.get("provider_usage_coverage") == "NOT_APPLICABLE"
                 and metrics.get("observed_tokens") is None,
                 "Synthetic suite cannot claim model tokens")
+    check_suite_telemetry(report, expected_model, _assert)
     return {
         "consistent": True,
         "expected_model_kind": expected_model,

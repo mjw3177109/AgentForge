@@ -524,3 +524,27 @@ python scripts/verify_django_v14_evidence.py \
 验证真实 DeepSeek 使用情况仍需对照对应 GitHub Actions
 运行记录、API 服务商用量账单及可信执行环境。也不是已完成
 持久 VM 生产部署或对抗性沙箱安全认证。
+
+
+
+## V1.5 — 模型角色顺序和 Token 证据强一致性
+
+V1.4 的验收回执已经具备固定基准 manifest、源码/测试哈希、
+Docker 正向业务测试数和总体报告防篡改校验。V1.5 进一步校验：
+
+- PASS 必须完整对应 `Planner → Executor → Reviewer`，或者仅一次
+  修复时对应 `Planner → Executor → Reviewer → Fixer → Reviewer`；
+  同时强制每个角色的 schema 接受状态为成功；
+- 模型角色请求数、允许的修复次数和独立 Docker 验证轮数必须一致；
+  任意删除 Reviewer、虚增调用次数、伪造二次验证都将拒绝 PASS；
+- 来自真实 DeepSeek 的使用量必须满足 coverage、
+  `provider_usage_reports`、逐案例 token 和总 token 的一致性；
+  未报告的模型费用继续保留 UNKNOWN，不能自动被认作 $0；
+- 全套角色计数、单次修复成功案例、缺失调用数必须与案例级记录一致。
+
+新增 `django_tests/test_v15_consistency.py`，覆盖伪造角色轨迹、修复数、
+Docker 验证数、token 覆盖率及合法无修复/一次修复路径。
+
+验收仍然仅检查报告内部的逻辑一致性，不能证明模型供应商身份、
+防止同一操作者同时伪造报告和校验程序，也不意味着独立云 VM 已部署。
+真实 DeepSeek 三案例仍未在本阶段运行，原有手动付费门禁不变。

@@ -28,6 +28,8 @@ def sample_report(*, real=False):
             "source_untouched": True,
             "independent_test_passed": True,
             "candidate_hash": "a" * 64,
+            "repair_attempts": 0,
+            "docker_verification_rounds": 1,
             "original_source_sha256": hashlib.sha256(
                 s.source.encode("utf-8")
             ).hexdigest(),
