@@ -1,7 +1,14 @@
 """Offline tests only. These do not claim a REAL model was contacted."""
+import importlib.util
+from pathlib import Path
+
 import pytest
 
-from scripts.run_django_v04_live_acceptance import ReadOnlyGate, evaluate
+_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "run_django_v04_live_acceptance.py"
+_SPEC = importlib.util.spec_from_file_location("django_v04_live_acceptance", _SCRIPT)
+_MODULE = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MODULE)
+evaluate = _MODULE.evaluate
 
 
 class ModelClient:
