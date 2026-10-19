@@ -102,6 +102,7 @@ class HeartbeatContractTests(TestCase):
 
     def test_stale_heartbeat_is_advisory_not_auto_recovery(self):
         JobLease.objects.filter(pk=self.lease.pk).update(
+            heartbeat_enabled=True,
             heartbeat_at=timezone.now() - timedelta(minutes=30),
         )
         with override_settings(AGENTFORGE_V09_HEARTBEAT_ENABLED=True):
