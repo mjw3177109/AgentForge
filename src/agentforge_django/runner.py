@@ -222,12 +222,19 @@ def _run_claimed_job(job):
         status, result = AgentJob.Status.FAIL, {
             "failure_class": "RUNTIME_OR_ENVIRONMENT", "error_type": type(exc).__name__}
     finally:
-        AgentJob.objects.filter(pk=job.pk, status=AgentJob.Status.RUNNING).update(
-            status=status, result=result, finished_at=timezone.now(),
-        )
-        record(job, "final_gate", status, {
-            "failure_class": result.get("failure_class", ""),
-            "candidate_only": bool(result.get("candidate_only", False)),
-        })
+        finalized = AgentJob.objects.filter(
+            pk=job.pk, status=AgentJob.Status.RUNNING
+        ).update(status=status, result=result, finished_at=timezone.now())
+        # Another operator may have explicitly recovered the worker meanwhile.
+        # Never turn that recovered BLOCKED job back into PASS/PROPOSED.
+        if finalized:
+            record(job, "final_gate", status, {
+                "failure_class": result.get("failure_class", ""),
+                "candidate_only": bool(result.get("candidate_only", False)),
+            })
+        else:
+            record(job, "final_gate", "BLOCKED", {
+                "failure_class": "STALE_WORKER_FINALIZATION_REJECTED",
+            })
     job.refresh_from_db()
     return job
