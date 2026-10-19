@@ -61,7 +61,7 @@ def build_docker_command(*, image, source, name, check, memory="768m", cpus="1.0
         "--env", "PYTHONDONTWRITEBYTECODE=1",
         "--env", "HOME=/tmp",
         "--env", "PYTHONUNBUFFERED=1",
-        "--mount", f"type=bind,src={source},dst=/workspace,rw",
+        "--mount", f"type=bind,src={source},dst=/workspace",
         image, "python", "manage.py", check, "--no-color",
     ]
     if check == "test":
