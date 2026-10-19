@@ -1,4 +1,4 @@
-# AgentForge Django Agent Manager V0.4
+# AgentForge Django Agent Manager V0.5
 
 ## Positioning
 
@@ -338,3 +338,77 @@ This is an opt-in paid REAL DeepSeek request: exactly 3 model calls when
 each returns a valid structured response (API retries may generate additional
 attempts). No credentials => BLOCKED. It must not be confused with full
 V2.0 autonomous coding stability acceptance.
+
+
+## V0.5 — isolated candidate coding, broker and 3/3 fixture acceptance
+
+The V0.5 code path is additive. The previous autonomous V2.0 subprocess
+executor remains disabled by default. The new path enters only after all
+existing project switches, an immutable human approval matching the exact
+request/configuration/HEAD, Docker backend and explicit permission to send
+source files to the external LLM.
+
+The trusted Worker controls three separate typed calls:
+Planner → Executor → Reviewer. Models return JSON text only; never agent-chosen
+shell commands, npm/pip installs or test commands. Hard-coded Python policy
+rechecks every planned path and edit: existing .py files only; 1-3 files;
+source <=16 kB/file; complete replacement <=24 kB/file; settings,
+migrations, test_*, manage.py, symlinks and out-of-scope paths are prohibited.
+Review APPROVE is advisory only. No PR or deployment is permitted.
+
+The candidate is written only to a disposable local copy. The Validator calls
+the independent V0.4 offline Docker test gate (fixed Django check/test);
+no production DB is mounted. A candidate becomes PROPOSED only when the
+Reviewer approved *and* Docker independently passed real business tests.
+Only the patch and sanitized gate evidence remain in the Django job result.
+A failed validation is FAIL and no candidate patch is exposed.
+
+### LLM broker limits and explicit consent
+
+Set the preexisting `AGENTFORGE_LLM_BASE_URL` to
+`https://api.deepseek.com`, `AGENTFORGE_LLM_MODEL=deepseek-chat`, and
+`AGENTFORGE_LLM_API_KEY` only in the dedicated trusted Worker.
+`AGENTFORGE_V05_ENABLE_SOURCE_TRANSFER` is false by default.
+The separate `AGENTFORGE_V05_ALLOWED_LLM_HOSTS` defaults to
+`api.deepseek.com`. The broker caps requests to 3, max output
+tokens to 2048 per request, size of prompts/responses and an overall
+150-second deadline. SDK retries are disabled for V0.5; no infinite retry
+loop and no API credentials passed to Docker containers.
+
+**IMPORTANT:** Without provider usage data, this is a request/token output
+budget, NOT a verified cost ceiling. Source code is transmitted only after
+the operator explicitly permits it; do not enable for sensitive third-party
+sources absent organizational authorization. Docker isolation is not a secure
+multitenant adversarial container sandbox. Production use still needs dedicated
+VM/microVM boundaries, credential separation, immutable image provenance and
+strong audit storage.
+
+### Independent three-cycle benchmark
+
+```bash
+docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+python scripts/run_django_v05_smoke.py
+```
+CI runs the smoke with **ScriptedFakeAgent**, but REAL Docker for the corrected
+Django business test; offline passes must be labeled `SYNTHETIC_AGENT_REAL_DOCKER`.
+A broken baseline is separately asserted to fail before a candidate is
+accepted. The original fixture remains unchanged.
+
+To use paid real DeepSeek for the same tiny synthetic project, in a dedicated
+trusted CI terminal run:
+```bash
+python scripts/run_django_v05_live_acceptance.py --confirm-paid-calls
+```
+Each of 3 fully fresh iterations makes 3 real planner/executor/reviewer
+calls and independently verifies the result in Docker. Success requires
+3/3 completed code candidates plus untouched originals. The script's JSON
+only records redacted status, patch hashes, model-call counts and gate facts.
+A failure cannot be reclassified as success; missing API key => BLOCKED.
+
+The alternate `workflow_dispatch` CI is opt-in and is not available from
+GitHub's branch UI unless its workflow is already present on the default branch.
+We do not modify `main` in this development branch.
+
+This test **does not prove** 3/3 reliability on real customer Django apps,
+secure execution against hostile code, actual monetary spend, or suitability
+for deployment. No model-generated output is merged or pushed automatically.

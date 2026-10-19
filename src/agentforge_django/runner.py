@@ -34,6 +34,24 @@ def _git(root, *args, timeout=30):
 
 
 def _autonomous(job, root):
+    if getattr(settings, "AGENTFORGE_V05_ISOLATED_AUTONOMOUS", False):
+        from .v05_coding import run_approved_v05
+        outcome = run_approved_v05(job, root)
+        decision = outcome.get("status")
+        record(job, "v05_review", outcome.get("review_decision", "NOT_RUN"), {
+            "model_calls": outcome.get("model_calls"),
+            "source_file_count": len(outcome.get("source_files", [])),
+        })
+        verification = outcome.get("independent_verification", {})
+        record(job, "v05_validator", "PASS" if verification.get("passed") else "NOT_PASS", {
+            "backend": verification.get("backend", "NOT_RUN"),
+            "checks": len(verification.get("checks", [])),
+        })
+        if decision == "PROPOSED":
+            return AgentJob.Status.PROPOSED, outcome
+        if decision == "FAILED":
+            return AgentJob.Status.FAIL, outcome
+        return AgentJob.Status.BLOCKED, outcome
     # Legacy Core V2.0 executes agent-generated verification commands in host
     # subprocesses. It is deliberately OFF by default in V0.4. Docker VERIFY
     # is safe to use independently, but cannot secure the earlier coding stage.

@@ -94,3 +94,49 @@ python scripts/run_django_v04_live_acceptance.py
 ```
 仅显式运行时才实际调用收费模型。它验证的是三轮**只读策略决策**，
 不是三轮完整的自动编码交付。未运行就保持 NOT_RUN/BLOCKED，不能伪造成功。
+
+
+## V0.5 — 受限自动编码候选交付
+
+V0.5 不会重新打开原 V2.0 的宿主机编码执行器，而是启用独立链路：
+
+```
+已授权的任务 → DeepSeek Planner → DeepSeek Executor → DeepSeek Reviewer
+           → 受限全文件替换（临时副本） → 离线 Docker Validator
+           → 人工审核候选补丁（绝不自动合并、发布）
+```
+
+新模块：`v05_broker.py`、`v05_coding.py`、`v05_fixture.py`。
+只允许修改现有小型 Python 源文件，不允许修改测试、Django settings、
+迁移、密钥或超出白名单的文件。Validator 由固定 Docker 命令独立运行，
+不会执行模型自行指定的命令。
+
+开发环境验证命令：
+```bash
+docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+python scripts/run_django_v05_smoke.py
+```
+这个 Smoke Test 使用**模拟 Agent 文本响应 + 真正的 Docker 业务测试**。
+它不是付费 DeepSeek 测试。
+
+在专用可信 Worker 的 Django settings 中，受人工审批后才可按需配置：
+```python
+AGENTFORGE_VERIFICATION_BACKEND = "docker"
+AGENTFORGE_ALLOW_AUTONOMOUS = True
+AGENTFORGE_V05_ISOLATED_AUTONOMOUS = True
+AGENTFORGE_V05_ENABLE_SOURCE_TRANSFER = True
+AGENTFORGE_V05_ALLOWED_LLM_HOSTS = ("api.deepseek.com",)
+```
+此外还必须有单任务 `MutationApproval`、项目授权、干净 Git HEAD、
+已配置离线镜像、真实源文件写入白名单及 DeepSeek API Key。
+默认示例 settings 保持全部 OFF。
+
+在明确同意付费并使用**固定的合成 Django 项目**时，可运行真实模型三轮：
+```bash
+python scripts/run_django_v05_live_acceptance.py --confirm-paid-calls
+```
+每轮调用三个真实模型角色并执行真正的 Docker 业务测试，总计正常为
+9 次 API 请求；出错时可能更少。完整证据写入
+`artifacts/django-v05-live/summary.json`。
+此验收默认**不会运行**，没有 API Key 时不伪造结果。
+它只证明合成案例，不证明实际业务项目达到 3/3 生产稳定性。

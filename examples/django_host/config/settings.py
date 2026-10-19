@@ -58,3 +58,9 @@ AGENTFORGE_VERIFICATION_BACKEND = "docker"
 AGENTFORGE_DOCKER_VERIFY_IMAGE = "agentforge-django-verify:0.4"
 AGENTFORGE_ALLOW_UNSAFE_LOCAL_VERIFY = False
 AGENTFORGE_ENABLE_LEGACY_HOST_AUTONOMOUS = False
+
+# V0.5 is a separately enabled candidate-only coding pipeline.
+# Enable only inside a trusted dedicated worker with project-level human approval.
+AGENTFORGE_V05_ISOLATED_AUTONOMOUS = False
+AGENTFORGE_V05_ENABLE_SOURCE_TRANSFER = False
+AGENTFORGE_V05_ALLOWED_LLM_HOSTS = ("api.deepseek.com",)

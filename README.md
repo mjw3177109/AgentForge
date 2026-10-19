@@ -55,3 +55,11 @@ The previous host autonomous coding path is disabled by default pending a
 secure isolated coding executor. Manual real-model acceptance in
 `.github/workflows/agentforge-django-v04-live.yml` tests only a read-only
 three-round policy fixture; full coding stability is not claimed.
+
+
+## V0.5 constrained coding candidate pipeline
+
+A new optional Django coding path performs bounded typed Planner/Executor/
+Reviewer calls and independent offline Docker test verification. The old host
+subprocess coding executor remains closed by default, and production deployment
+remains an explicit human-only action. See README_DJANGO.md.
