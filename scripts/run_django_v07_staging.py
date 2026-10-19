@@ -160,6 +160,29 @@ def main():
             and git(project_root, "rev-parse", "HEAD") == original_sha
         )
         independent = job.result.get("independent_verification", {})
+        # V0.8 human handoff: authenticated superuser receives candidate-only
+        # bytes; git apply --check validates usability WITHOUT applying them.
+        from django.test import Client
+        from django.urls import reverse
+        client = Client()
+        client.force_login(admin)
+        patch_response = client.get(reverse(
+            "agentforge_django:download_candidate_patch", args=[job.pk]
+        ))
+        export_ok = (
+            patch_response.status_code == 200
+            and patch_response.get("X-AgentForge-Candidate-Only") == "true"
+            and patch_response.get("X-AgentForge-Patch-SHA256") ==
+                job.result.get("patch_sha256")
+        )
+        apply_check_ok = False
+        if export_ok:
+            check = subprocess.run(
+                ["git", "apply", "--check", "-p1", "-"],
+                input=patch_response.content,
+                cwd=project_root, capture_output=True, timeout=15,
+            )
+            apply_check_ok = check.returncode == 0
         evidence = {
             "gate": "EPHEMERAL_POSTGRES_CROSS_PROCESS_REAL_DOCKER_FAKE_LLM",
             "http_control_plane_started": endpoint_ready,
@@ -171,6 +194,8 @@ def main():
             "worker": worker_evidence,
             "docker_final_pass": _accepted(independent),
             "source_repo_unchanged": project_file_unchanged,
+            "candidate_download_integrity_ok": export_ok,
+            "candidate_git_apply_check_only": apply_check_ok,
             "real_deepseek_tested": False,
             "persistent_remote_worker_deployed": False,
             "production_release_authorized": False,
@@ -181,6 +206,7 @@ def main():
             and evidence["docker_final_pass"]
             and project_file_unchanged
             and evidence["audit_hash_chain_valid"]
+            and export_ok and apply_check_ok
         ):
             raise SystemExit(2)
 
