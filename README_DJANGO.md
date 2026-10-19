@@ -188,3 +188,29 @@ python scripts/run_django_v06_live_acceptance.py --confirm-paid-calls
 `examples/django_host/config/v06_worker_settings.py`，
 独立 VM 配置、数据库及权限要求见 `deploy/v06/README.md`。
 **它不是已部署的安全多租户 Worker**，不能给公开用户任意提交代码执行。
+
+
+## V0.7 — PostgreSQL + 跨进程 Worker 临时集成验收
+
+本阶段修复 **V0.6 真实 DeepSeek Broker 不接受 max_requests=5** 的缺陷，
+增加 HTTPS 主机/端口校验，阻止授权令牌被误发往非 TLS 接口。
+
+新增 `.github/workflows/agentforge-django-v07-staging.yml`：在 GitHub
+Actions 的临时 Ubuntu Runner 上启动 PostgreSQL 和 Django 控制端，
+再启动一个独立 Python Worker 进程，分别配置 Django Settings。
+用一次真实的人类审批记录、真实 PostgreSQL 任务状态和真实 Docker
+验证测试“初始业务失败 → 第一修复仍失败 → 第二修复成功”。
+模型角色使用明示的 **Scripted Fake**，CI 不消耗 DeepSeek 费用。
+
+- Worker 无真实 DeepSeek key，产生候选补丁，不合并、不发布；
+- 控制端没有 Docker 运行入口，不开启自治执行开关；
+- 两个进程共用临时 PostgreSQL，整个运行结束即销毁；
+- 真实 Docker 从不共享 Git 源库、PostgreSQL 密钥和 Docker socket；
+- 这是 **同一 GitHub CI 主机上的两个进程**，不是两个独立 VM。
+
+实际部署独立服务器还需要服务器地址、数据库访问方式及凭据；
+仓库中的 `deploy/v07/` 是可参考的部署文件而非已经启动的服务。
+
+真实 DeepSeek 三轮测试仍需要显式授权和可用 API Key。
+开发分支默认不自动付费、不伪造结果。GitHub 现阶段只开放
+合成模型的临时 staging 验收。

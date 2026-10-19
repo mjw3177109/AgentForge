@@ -1,4 +1,4 @@
-# AgentForge Django Agent Manager V0.6
+# AgentForge Django Agent Manager V0.7
 
 ## Positioning
 
@@ -480,3 +480,29 @@ synthetic fixture. It does not claim production customer project reliability,
 provable monetary limits or secure hostile-code isolation. The manual GitHub
 workflow cannot necessarily dispatch until placed in the default branch,
 which this implementation does NOT modify.
+
+
+## V0.7 — ephemeral cross-process staging and broker regression
+
+V0.6 critical contract repair: `create_v05_broker(max_requests=5)` used to
+raise TypeError even though mocked CI broker calls passed. The function now
+accepts ONLY the bounded 3/5 budgets. In addition, it rejects HTTP, non-443
+ports, userinfo, fragments, query tokens and non-allowlisted DeepSeek hosts.
+Never use a potentially forwarded Authorization bearer over plain HTTP.
+
+Staging CI now starts actual ephemeral PostgreSQL and a Django web subprocess,
+creates an operator-approved autonomous synthetic job (with immutable Git
+commit and scope), then launches a separate worker Python process. The worker
+uses a ScriptedFakeModel and real Docker check/test across a failing first
+candidate and a repaired passing second candidate. Both control and worker
+persist state via PostgreSQL; the source repository stays unmodified.
+CI report key: `EPHEMERAL_POSTGRES_CROSS_PROCESS_REAL_DOCKER_FAKE_LLM`.
+
+THIS IS NOT A PERSISTENT VM DEPLOYMENT. GitHub CI web/worker processes share a
+runner host OS and Docker daemon. It cannot establish hostile-code isolation.
+No public endpoint is exposed; runserver listens on 127.0.0.1 only.
+Its explicit synthetic-only gate prevents accidental use as a real worker.
+
+The paid 3-round DeepSeek acceptance remains separate and is not run by default.
+Never treat fake-agent staging pass as real-model 3/3 reliability. See
+`deploy/v07/README.md` for service deployment and approval prerequisites.

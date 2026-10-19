@@ -79,14 +79,27 @@ class BoundedDeepSeek(OpenAICompatibleClient):
         return content
 
 
-def create_v05_broker():
+def create_v05_broker(*, max_requests=3):
+    if type(max_requests) is not int or max_requests not in (3, 5):
+        raise BoundaryDenied("Model call budget must be exactly 3 or 5")
     if not getattr(settings, "AGENTFORGE_V05_ENABLE_SOURCE_TRANSFER", False):
         raise BoundaryDenied("Sending source to the LLM is not authorized")
     config = ExternalLLMSettings.from_env()
-    host = urllib.parse.urlparse(config.base_url).hostname
+    parsed = urllib.parse.urlsplit(config.base_url)
     hosts = getattr(settings, "AGENTFORGE_V05_ALLOWED_LLM_HOSTS", ("api.deepseek.com",))
-    if host not in hosts or config.model != "deepseek-chat" or not config.api_key:
-        raise BoundaryDenied("V0.5 requires an explicitly allowed DeepSeek model and API key")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise BoundaryDenied("Invalid DeepSeek URL port") from exc
+    if (
+        parsed.scheme != "https" or parsed.hostname not in hosts
+        or parsed.username is not None or parsed.password is not None
+        or port not in (None, 443) or parsed.query or parsed.fragment
+        or parsed.path.rstrip("/") not in ("", "/v1", "/chat/completions", "/v1/chat/completions")
+        or config.model != "deepseek-chat" or not config.api_key
+    ):
+        raise BoundaryDenied("DeepSeek must use an allowlisted HTTPS endpoint and model")
     return BoundedDeepSeek(
-        api_key=config.api_key, base_url=config.base_url, model=config.model
+        api_key=config.api_key, base_url=config.base_url, model=config.model,
+        max_requests=max_requests,
     )

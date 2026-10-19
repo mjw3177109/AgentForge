@@ -1,0 +1,12 @@
+[Unit]
+Description=AgentForge Django trusted worker one-shot schedule
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=1min
+AccuracySec=10s
+Persistent=false
+Unit=agentforge-worker.service
+
+[Install]
+WantedBy=timers.target

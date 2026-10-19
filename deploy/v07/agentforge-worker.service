@@ -1,0 +1,23 @@
+[Unit]
+Description=AgentForge Django trusted one-shot worker (candidate-only)
+Wants=network-online.target
+After=network-online.target docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=agentforge
+Group=agentforge
+WorkingDirectory=/opt/agentforge/AgentForge
+Environment=DJANGO_SETTINGS_MODULE=config.v06_worker_settings
+EnvironmentFile=/etc/agentforge/v07-worker.env
+ExecStart=/opt/agentforge/venv/bin/python /opt/agentforge/AgentForge/examples/django_host/manage.py process_agentforge_queue --max-jobs 1 --include-autonomous
+NoNewPrivileges=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=true
+TimeoutStartSec=900
+UMask=0077
+
+# WARNING: The Docker daemon user/group provides host-level privilege on
+# this worker VM. Protect the VM itself. Do not install on the public web host.

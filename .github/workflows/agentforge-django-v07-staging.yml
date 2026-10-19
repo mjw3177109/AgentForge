@@ -1,0 +1,54 @@
+name: AgentForge Django V0.7 ephemeral PostgreSQL worker staging
+
+on:
+  push:
+    branches:
+      - feature/django-agent-manager-v1
+  pull_request:
+    paths:
+      - "scripts/run_django_v07_staging*.py"
+      - "examples/django_host/config/v07_*"
+      - "src/agentforge_django/**"
+      - "django_tests/**"
+      - ".github/workflows/agentforge-django-v07-staging.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-cross-process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: af_v07_ci
+          POSTGRES_PASSWORD: ci_only_ephemeral_password_2026
+          POSTGRES_DB: af_v07_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U af_v07_ci -d af_v07_ci"
+          --health-interval=5s
+          --health-timeout=3s
+          --health-retries=12
+    env:
+      AGENTFORGE_V07_STAGING_ENABLE: GITHUB_ACTIONS_SYNTHETIC
+      AGENTFORGE_PG_HOST: 127.0.0.1
+      AGENTFORGE_PG_PORT: "5432"
+      AGENTFORGE_PG_USER: af_v07_ci
+      AGENTFORGE_PG_PASSWORD: ci_only_ephemeral_password_2026
+      AGENTFORGE_PG_NAME: af_v07_ci
+      DJANGO_SECRET_KEY: CI_SYNTHETIC_NOT_FOR_REAL_DEPLOYMENT_REPLACE_ALWAYS
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install web/worker and PostgreSQL driver
+        run: python -m pip install -e ".[dev,staging]"
+      - name: Build real Docker validator
+        run: docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+      - name: Run PostgreSQL, actual Django HTTP, independent worker process and real Docker tests
+        run: python scripts/run_django_v07_staging.py
