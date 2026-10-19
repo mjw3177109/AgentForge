@@ -50,6 +50,15 @@ def main():
                         "reason": item.get("reason", "")} for item in result["checks"]],
         }))
         if not result["passed"]:
+            # This test fixture is synthetic and contains NO user code or secrets.
+            # Show bounded Docker stderr for actionable CI diagnosis only.
+            for item in result["checks"]:
+                if not item["success"]:
+                    print("SMOKE_DIAGNOSTIC", json.dumps({
+                        "returncode": item.get("returncode"),
+                        "stderr": item.get("stderr", "")[-2500:],
+                        "stdout": item.get("stdout", "")[-500:],
+                    }))
             raise SystemExit(2)
 
 
