@@ -33,6 +33,8 @@ class BoundedDeepSeek(OpenAICompatibleClient):
         self.calls = 0
         self.deadline = time.monotonic() + seconds
         self.seconds = seconds
+        self.usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        self.usage_reports = 0
 
     def _request(self, system, user):
         if self.remaining <= 0 or time.monotonic() >= self.deadline:
@@ -71,9 +73,19 @@ class BoundedDeepSeek(OpenAICompatibleClient):
         if len(bounded) > 128000:
             raise BoundaryDenied("Model response byte limit exceeded")
         try:
-            content = json.loads(bounded)["choices"][0]["message"]["content"]
+            payload = json.loads(bounded)
+            content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise LLMError("DeepSeek response structure invalid") from exc
+        # Provider usage is optional. Never estimate missing tokens or billing.
+        usage = payload.get("usage")
+        if isinstance(usage, dict) and all(
+            type(usage.get(key)) is int and 0 <= usage[key] <= 1000000
+            for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+        ):
+            for key in self.usage:
+                self.usage[key] += usage[key]
+            self.usage_reports += 1
         if not isinstance(content, str) or len(content) > 45000:
             raise BoundaryDenied("Model content limit exceeded")
         return content

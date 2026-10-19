@@ -690,3 +690,16 @@ python scripts/run_django_v11_live.py --confirm-paid-calls \
 输出仅包含脱敏的分数、计数、哈希和错误类别，不包含源代码、
 提示词、API 密钥及测试原始日志。**3/3 合成基准通过不等于实际业务项目已
 达到生产可用性，也不证明多租户恶意代码隔离。**
+
+
+## V1.1 真实 DeepSeek 接口验收加强
+
+本阶段增加**真实 HTTP 请求格式的离线契约测试**，检查 DeepSeek 请求地址、
+Authorization、模型、`max_tokens`、请求失败扣额度和 429 不重试。
+同时记录 API 返回的 `usage.prompt_tokens`、`completion_tokens`、
+`total_tokens`，仅在提供方返回完整、合法数据时计数；
+**没有 usage 字段绝不能声称 token 费用已测量**。
+
+现有真实 DeepSeek 3/3 付费工作流仍然为显式 opt-in，
+未启用时不会调用 API。HTTP 模拟测试不等于真实 DeepSeek 已通过。
+生产 VM 与真实业务项目验收也仍独立。
