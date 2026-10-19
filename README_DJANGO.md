@@ -448,3 +448,39 @@ GitHub 运行日志及原始脱敏 JSON 证据。
 
 V1.2 的 CI 通过只证明报告正确生成和现有工程回归稳定，
 不证明真实 DeepSeek 3/3、持久化独立 VM 已部署或生产可用。
+
+
+## V1.3 · 真实 DeepSeek 运行可信来源与可恢复证据
+
+本阶段修正验收漏洞：不能只传入 `model_kind=REAL_DEEPSEEK`
+就把脚本模拟 Agent 的成绩标记为真实模型成功。三案例实际运行器在
+**调用模型之前**验证客户端必须是受限 `BoundedDeepSeek`
+类型，并检查正式 HTTPS DeepSeek 接口、`deepseek-chat`、
+禁重试设置、尚未消费的五次请求限额及密钥非空。
+未通过校验时案例直接失败，整套报告 `real_model_verified=False`。
+
+真实模式还会在第一笔模型 API 请求之前，先使用 Docker
+**完整检查全部三个不同基准的原始缺陷**。其中任何一个不具备
+合格的失败基线，直接停止且不产生付费调用。
+这些检查只证明当前合成基准可执行，不是生产环境安全证明。
+
+付费任务现在每完成一个案例就写入独立的
+`checkpoint.json`，使用同目录临时文件和原子替换，
+只包含固定白名单的案例编号、结果、错误类别和请求计数。
+检查点明确标记 `INCOMPLETE_UNTIL_FINAL_REPORT`、
+`real_model_verified=False`；流程中途崩溃不会把部分结果冒充 3/3。
+最终报告仍是 `report.json`，不会包含原始源码、提示词或异常内容。
+GitHub Actions 额外保留 Markdown 人工审查摘要。
+
+真实付费工作流 `.github/workflows/agentforge-django-v11-live.yml`
+已改为**仅可手动触发**，不再因修改这个文件而触发付费工作；
+同时仍需要仓库管理员显式打开
+`AGENTFORGE_V07_PAID_LIVE=I_APPROVE_THREE_DEEPSEEK_RUNS`
+并提供 `AGENTFORGE_LLM_API_KEY`。在 GitHub UI 中，该工作流
+通常需要先存在于默认分支才能使用 workflow_dispatch；
+本阶段**不修改 main、不自动配置密钥、不授权付费**。
+
+重要：运行时客户端类型检查只是防止误用的工程控制，
+不是可独立验证的远程模型身份/消费证明。只有对应的 GitHub
+执行日志和服务商账单/用量信息，才能进一步佐证实际 API 调用。
+即使真实三案例 3/3，也不能据此认定已通过任意生产项目或恶意代码隔离测试。

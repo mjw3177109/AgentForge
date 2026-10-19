@@ -1,12 +1,8 @@
 name: AgentForge Django V1.1 three-case REAL DeepSeek acceptance
 
 # Not started by a normal code push. Owner opt-in only.
+# Manual only: repository variables do NOT make a push spend money.
 on:
-  push:
-    branches:
-      - feature/django-agent-manager-v1
-    paths:
-      - ".github/workflows/agentforge-django-v11-live.yml"
   workflow_dispatch:
 
 permissions:
@@ -37,12 +33,20 @@ jobs:
       - name: Build offline Docker verifier
         run: docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
       - name: Execute three distinct REAL DeepSeek cases with independent validation
-        run: python scripts/run_django_v11_live.py --confirm-paid-calls --output artifacts/django-v11-live/report.json
+        run: python scripts/run_django_v11_live.py --confirm-paid-calls --output artifacts/django-v11-live/report.json --checkpoint artifacts/django-v11-live/checkpoint.json
+      - name: Render human-readable V1.3 report without source code
+        if: always()
+        run: |
+          if [ -f artifacts/django-v11-live/report.json ]; then
+            python scripts/render_django_v12_report.py \
+              --input artifacts/django-v11-live/report.json \
+              --output artifacts/django-v11-live/operator-summary.md
+          fi
       - name: Archive redacted per-case evidence even on failure
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: agentforge-v11-three-case-real-deepseek-evidence
-          path: artifacts/django-v11-live/report.json
+          path: artifacts/django-v11-live/
           if-no-files-found: warn
           retention-days: 14
