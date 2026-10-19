@@ -548,3 +548,35 @@ Docker 验证数、token 覆盖率及合法无修复/一次修复路径。
 验收仍然仅检查报告内部的逻辑一致性，不能证明模型供应商身份、
 防止同一操作者同时伪造报告和校验程序，也不意味着独立云 VM 已部署。
 真实 DeepSeek 三案例仍未在本阶段运行，原有手动付费门禁不变。
+
+
+## V1.6 — Docker 测试防篡改写入屏障
+
+本阶段修复独立验证器的真实安全隐患：此前容器虽然指定
+`--read-only`，但项目代码挂载 `--mount type=bind` 默认仍可写。
+恶意候选代码可能在 `manage.py check` 阶段修改临时业务测试文件，
+继而影响 `manage.py test` 的真实通过结果。
+
+修复方式：
+1. Docker 项目挂载现在显式使用 `dst=/workspace,readonly`，
+   禁止容器内对任何项目文件的新增、删除、覆盖；
+2. 拷贝后的目录/文件权限从 `0777/0666` 收紧为 `0755/0644`，
+   不再给非特权测试用户额外写权限；
+3. 对临时工作区完整文件清单、路径和字节内容计算 SHA-256 指纹，
+   每条 Docker 检查执行前后校验；发生任何文件篡改，
+   立即设置 `VERIFICATION_WORKTREE_MUTATED`，不执行后续测试；
+4. 增加真实 Docker 攻击测试：候选代码在 `check` 阶段尝试覆写
+   `app/tests.py`，必须失败；合法修复仍必须成功通过 Django
+   正向业务测试。原始项目不会被修改。
+
+测试：
+~~~bash
+docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+python scripts/run_django_v16_write_barrier_smoke.py
+~~~
+
+安全边界：只读挂载是防止验证阶段改写测试的保护，
+**不是**恶意代码不可突破的内核级隔离；Docker daemon 或宿主被控制、
+测试本身有逻辑漏洞、模型假造行为等问题仍需要更强独立 VM/
+微虚拟机、可信镜像摘要、审计与人工审批。实际 DeepSeek 付费调用
+及持久 VM 部署仍未执行，本阶段不将测试脚本称为真实模型验收。

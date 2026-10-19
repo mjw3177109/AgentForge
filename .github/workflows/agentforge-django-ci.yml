@@ -46,6 +46,8 @@ jobs:
         run: docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
       - name: Execute ACTUAL Django check and one business test inside Docker
         run: python scripts/run_django_v04_docker_smoke.py
+      - name: V1.6 real Docker rejects attempts to rewrite business tests
+        run: python scripts/run_django_v16_write_barrier_smoke.py
       - name: V0.5 simulated agents with ACTUAL Docker business repair acceptance
         run: python scripts/run_django_v05_smoke.py
       - name: V0.6 bounded repair (3 simulated-agent runs, 2 real Docker verifications each)

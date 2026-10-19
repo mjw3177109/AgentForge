@@ -3,6 +3,7 @@
 Docker is NOT a hardened boundary for actively malicious code. Use a dedicated
 least-privileged Linux worker, preferably nested in a VM, with no prod credentials.
 """
+import hashlib
 import re
 import shutil
 import subprocess
@@ -17,6 +18,30 @@ from .verification import copy_workspace, summarize_check
 
 
 _IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:-]{0,199}$")
+
+
+def workspace_fingerprint(root: Path):
+    """Snapshot *all* copied paths and contents, not just the Django tests.
+
+    This detects mutation by code run during the check/test phases. It is
+    defense-in-depth for the Docker read-only bind mount and is not a
+    cryptographic attestation of the Docker daemon/host.
+    """
+    digest = hashlib.sha256()
+    for entry in sorted(root.rglob("*")):
+        if entry.is_symlink():
+            raise BoundaryDenied("Verification worktree contains a symlink")
+        rel = entry.relative_to(root).as_posix().encode("utf-8")
+        if entry.is_dir():
+            digest.update(b"D\0" + rel + b"\0")
+        elif entry.is_file():
+            digest.update(b"F\0" + rel + b"\0")
+            with entry.open("rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(chunk)
+        else:
+            raise BoundaryDenied("Unexpected non-regular verifier worktree entry")
+    return digest.hexdigest()
 
 
 def docker_image():
@@ -61,7 +86,7 @@ def build_docker_command(*, image, source, name, check, memory="768m", cpus="1.0
         "--env", "PYTHONDONTWRITEBYTECODE=1",
         "--env", "HOME=/tmp",
         "--env", "PYTHONUNBUFFERED=1",
-        "--mount", f"type=bind,src={source},dst=/workspace",
+        "--mount", f"type=bind,src={source},dst=/workspace,readonly",
         image, "python", "manage.py", check, "--no-color",
     ]
     if check == "test":
@@ -85,15 +110,17 @@ def docker_verification(root: Path, *, with_tests=True, timeout=180):
     result = []
     with tempfile.TemporaryDirectory(prefix="agentforge-docker-work-") as tmp:
         sandbox = copy_workspace(root, Path(tmp) / "workspace")
-        # Only disposable files change. The Docker process executes unprivileged;
-        # allow traversal/writes in this disposable worktree alone.
+        # Disposable worktree is readable by UID 65534 but never writable
+        # from the Docker guest. Do not chmod 777/666; that enables writes
+        # if a future Docker/mount option is accidentally weakened.
         for directory in [sandbox, *sandbox.rglob("*")]:
             if directory.is_symlink():
                 raise BoundaryDenied("Symlink was copied into Docker worktree")
             if directory.is_dir():
-                directory.chmod(0o777)
+                directory.chmod(0o755)
             elif directory.is_file():
-                directory.chmod(0o666)
+                directory.chmod(0o644)
+        original_fingerprint = workspace_fingerprint(sandbox)
         for check in checks:
             name = f"agentforge-verify-{uuid.uuid4().hex[:20]}"
             argv = build_docker_command(
@@ -120,6 +147,11 @@ def docker_verification(root: Path, *, with_tests=True, timeout=180):
                     _run_docker(["rm", "-f", name], timeout=15)
                 except (OSError, subprocess.TimeoutExpired):
                     pass
+            # Never trust a PASS if code executed by 'check' or 'test'
+            # modified/created/deleted any file in the verifier source tree.
+            if workspace_fingerprint(sandbox) != original_fingerprint:
+                item["success"] = False
+                item["reason"] = "VERIFICATION_WORKTREE_MUTATED"
             result.append(item)
             if not item["success"]:
                 break
