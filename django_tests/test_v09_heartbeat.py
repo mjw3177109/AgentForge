@@ -93,7 +93,8 @@ class HeartbeatContractTests(TestCase):
             acquired_at=timezone.now() - timedelta(minutes=40),
             heartbeat_at=timezone.now(),
         )
-        with override_settings(AGENTFORGE_V09_HEARTBEAT_ENABLED=True):
+        JobLease.objects.filter(pk=self.lease.pk).update(heartbeat_enabled=True)
+        with override_settings(AGENTFORGE_V09_HEARTBEAT_ENABLED=False):
             record = lease_diagnostics(stale_after_minutes=20)[0]
         self.assertFalse(record["suspected_stale"])
         self.assertEqual(record["liveness"], "RECENT_HEARTBEAT")

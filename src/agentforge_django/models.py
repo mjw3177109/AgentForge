@@ -106,6 +106,7 @@ class JobLease(models.Model):
     owner_token = models.UUIDField(default=uuid.uuid4, editable=False)
     acquired_at = models.DateTimeField(auto_now_add=True)
     heartbeat_at = models.DateTimeField(default=timezone.now)
+    heartbeat_enabled = models.BooleanField(default=False)
 
     def __str__(self):
         return f"Lease {self.project_id}/{self.job_id}"

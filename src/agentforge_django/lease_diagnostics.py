@@ -18,7 +18,7 @@ def lease_diagnostics(*, stale_after_minutes=20):
         heartbeat_age = None if heartbeat is None else max(
             0, int((now - heartbeat).total_seconds())
         )
-        enabled = getattr(settings, "AGENTFORGE_V09_HEARTBEAT_ENABLED", False)
+        enabled = lease.heartbeat_enabled
         if not enabled:
             liveness = "UNKNOWN_LEGACY_NO_HEARTBEAT"
             stale = age >= stale_after_minutes * 60

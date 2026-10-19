@@ -187,7 +187,12 @@ def run_job(job_id):
     token = uuid.uuid4()
     try:
         with transaction.atomic():
-            JobLease.objects.create(project=job.project, job=job, owner_token=token)
+            JobLease.objects.create(
+                project=job.project, job=job, owner_token=token,
+                heartbeat_enabled=bool(
+                    getattr(settings, "AGENTFORGE_V09_HEARTBEAT_ENABLED", False)
+                ),
+            )
     except IntegrityError:
         # An existing lease means another worker owns this project.
         # Leave the job pending; never silently steal a lease.
