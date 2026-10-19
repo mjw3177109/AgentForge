@@ -21,6 +21,7 @@ from django.test.utils import override_settings
 from agentforge_django.v05_broker import create_v05_broker
 from agentforge_django.v05_fixture import REQUEST, make_fixture
 from agentforge_django.v06_repair import produce_candidate_v06
+from agentforge_django.live_evidence import summarize_candidate, failed_round
 
 
 def run_live():
@@ -38,31 +39,11 @@ def run_live():
                 untouched = "return a - b" in (
                     root / "app/views.py"
                 ).read_text("utf-8")
-                valid = (
-                    candidate.get("status") == "PROPOSED"
-                    and gate.get("passed") is True
-                    and gate.get("business_tests_executed") is True
-                    and gate.get("backend") == "docker-offline"
-                    and untouched
-                    and 3 <= broker.calls <= 5
-                )
-                runs.append({
-                    "round": index, "status": "PASS" if valid else "FAIL",
-                    "reason": "VALIDATED_CANDIDATE" if valid else "GATE_MISMATCH",
-                    "model_requests": broker.calls,
-                    "repair_attempts": candidate.get("repair_attempts"),
-                    "docker_verification_rounds": candidate.get(
-                        "budget", {}
-                    ).get("docker_verification_rounds", 0),
-                    "candidate_hash": candidate.get("patch_sha256"),
-                    "independent_test_passed": gate.get("passed") is True,
-                    "source_untouched": untouched,
-                })
+                runs.append(summarize_candidate(
+                    index, candidate, calls=broker.calls, source_untouched=untouched,
+                ))
         except Exception as exc:
-            runs.append({
-                "round": index, "status": "FAIL", "reason": "MODEL_DOCKER_POLICY_ERROR",
-                "error_type": type(exc).__name__,
-            })
+            runs.append(failed_round(index, exc))
     count = sum(item["status"] == "PASS" for item in runs)
     return {
         "schema": "agentforge.django.v06.real-coding.v1",

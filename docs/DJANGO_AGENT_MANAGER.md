@@ -1,4 +1,4 @@
-# AgentForge Django Agent Manager V0.8
+# AgentForge Django Agent Manager V1.0
 
 ## Positioning
 
@@ -598,3 +598,47 @@ explicit `recover_agentforge_job` operation.
 This is a reliability and fencing improvement, NOT a claim of hostile-code
 microVM sandboxing or persistent VM deployment. The source/DeepSeek data
 transfer permissions remain OFF unless explicitly authorized.
+
+
+## AgentForge V1.0 — atomic Worker fencing and real-model failure attribution
+
+**Candidate success and audit finalization are now one atomic database operation.**
+Both the Worker and manual recovery lock `AgentJob` and then `JobLease`
+in the same order. The Worker must still hold the *exact* owner token before
+committing any final PASS/PROPOSED, and every worker audit event is also
+fenced to a RUNNING job with its original lease. A recovered job's final
+`operator_recovery` event cannot be followed by a late Worker success event.
+
+If the ownership lease disappeared, V1.0 **leaves the job for operator
+investigation**, never fabricates a success or takes ownership from another
+Worker. Expired heartbeat or a heartbeat DB fault blocks candidate delivery.
+The migration/heartbeat features from V0.9 remain unchanged.
+
+V1.0 also adds read-only model readiness inventory and a typed, redacted
+result classifier, used by the *opt-in* DeepSeek 3-round script:
+
+```bash
+python scripts/check_agentforge_v10_readiness.py \
+    --output artifacts/agentforge-v10-readiness.json
+```
+
+The inventory **never calls DeepSeek or Docker**, and always reports
+`real_deepseek_three_round_result: NOT_RUN`. It merely checks whether
+necessary local settings/CLI are present; secret values are never printed.
+Real DeepSeek API calls require the already-existing explicit paid-run gate,
+and remain **NOT RUN** unless the user enables it. A true result report
+distinguishes MODEL_TRANSPORT_OR_SCHEMA, POLICY_OR_PRECONDITION,
+MODEL_REVIEW_REJECTED, INDEPENDENT_BEHAVIORAL_TEST_FAILED, and
+VERIFICATION_INFRASTRUCTURE. It never serializes raw model prompts,
+stdout/stderr or exception strings.
+
+New CI tests cover the following *negative* cases: old Worker tries to
+finalize after operator recovery, foreign owner token, missing lease,
+heartbeat loss/expiry, and model/API error messages containing secrets.
+PostgreSQL integration CI continues to check the actual cross-process
+Worker + Docker candidate-only loop, and core regression checks stay on.
+
+**Honest V1.0 boundary:** engineering CI passing is not real DeepSeek
+3/3 coding stability, not a dedicated external VM deployment, not a
+security-certified adversarial sandbox, and not production release permission.
+No `main` merge or paid model call is automatic.

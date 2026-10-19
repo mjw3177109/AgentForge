@@ -26,6 +26,8 @@ jobs:
       - run: python -m django check --settings=django_tests.settings
       - run: python -m django makemigrations agentforge_django --check --dry-run --settings=django_tests.settings
       - run: python -m django test django_tests --settings=django_tests.settings -v 2
+      - name: Read-only real-model readiness inventory (NO API calls)
+        run: python scripts/check_agentforge_v10_readiness.py
       - run: python examples/django_host/manage.py process_agentforge_queue --help
       - run: python examples/django_host/manage.py recover_agentforge_job --help
       - run: pytest -q
