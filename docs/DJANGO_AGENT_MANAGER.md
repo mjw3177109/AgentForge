@@ -320,3 +320,21 @@ names, but file naming conventions cannot guarantee all secret data is removed.
 NEXT GATE: isolated AUTO-CODING executor, external LLM broker with strict
 token/cost/time budgets, supported independent business harness and 3/3 actual
 code-generation rounds. Until that gate, V0.4 is a development framework.
+
+### Running the real-model gate while this feature branch is isolated
+
+GitHub `workflow_dispatch` normally requires the workflow file to exist on
+the repository's **default branch**. This V0.4 branch intentionally does NOT
+merge into `main`, so the manual workflow may not appear or dispatch until
+maintainers explicitly merge/publish that workflow.
+
+For now, use the equivalent local command in an authorized secure CI/terminal,
+with `AGENTFORGE_LLM_BASE_URL`, `AGENTFORGE_LLM_MODEL` and
+`AGENTFORGE_LLM_API_KEY` set as protected environment variables (not in source):
+```bash
+python scripts/run_django_v04_live_acceptance.py --output artifacts/django-v04-live/summary.json
+```
+This is an opt-in paid REAL DeepSeek request: exactly 3 model calls when
+each returns a valid structured response (API retries may generate additional
+attempts). No credentials => BLOCKED. It must not be confused with full
+V2.0 autonomous coding stability acceptance.

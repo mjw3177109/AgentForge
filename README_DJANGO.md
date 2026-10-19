@@ -84,3 +84,13 @@ VERIFY 默认只允许 Docker 离线容器运行 `python manage.py check/test`�
 此入口不是完整自治编码 3/3，未运行不可声称 PASS。
 
 细节与局限：[docs/DJANGO_AGENT_MANAGER.md](docs/DJANGO_AGENT_MANAGER.md)。
+
+### 特别说明：独立分支上的 DeepSeek 测试入口
+
+GitHub 的手动 `workflow_dispatch` 通常需要工作流文件已存在于默认分支。
+本项目仍保持 `main` 不动，因此先在可信终端配置好 API 环境变量，再执行：
+```bash
+python scripts/run_django_v04_live_acceptance.py
+```
+仅显式运行时才实际调用收费模型。它验证的是三轮**只读策略决策**，
+不是三轮完整的自动编码交付。未运行就保持 NOT_RUN/BLOCKED，不能伪造成功。
