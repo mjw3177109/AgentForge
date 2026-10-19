@@ -16,5 +16,8 @@ def test_paid_workflow_is_gated_and_offline_is_separate():
     assert "vars.AGENTFORGE_V07_PAID_LIVE" in workflow
     assert "secrets.AGENTFORGE_LLM_API_KEY" in workflow
     assert "workflow_dispatch" in workflow
-    assert "paths:" in workflow
+    # V1.3 intentionally removed push; paid calls must require manual dispatch.
+    assert "  workflow_dispatch:" in workflow
+    assert "  push:" not in workflow
+    assert "--checkpoint" in workflow
     assert "run_django_v11_live.py --confirm-paid-calls" in workflow
