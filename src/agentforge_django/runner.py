@@ -1,6 +1,8 @@
 """Synchronous job worker. Execute with management command, never an HTTP handler."""
 
 import hashlib
+import os
+from unittest.mock import patch
 import subprocess
 import tempfile
 from pathlib import Path
@@ -10,7 +12,7 @@ from django.utils import timezone
 
 from .audit import record
 from .guard import (
-    BoundaryDenied, checked_root, scope_within, scoped_file, validate_write_scopes,
+    BoundaryDenied, checked_root, private_environment, scope_within, scoped_file, validate_write_scopes,
 )
 from .inspection import inspect_python, sanitized_manifest
 from .models import AgentJob
@@ -82,19 +84,24 @@ def _autonomous(job, root):
             raise BoundaryDenied("Cannot create isolated repository clone")
         _git(sandbox, "config", "user.name", "AgentForge Django")
         _git(sandbox, "config", "user.email", "agentforge@localhost.invalid")
+        llm_client = ExternalLLMSettings.from_env().client()
         pipeline = AutonomousDevelopmentPipeline(
-            client=ExternalLLMSettings.from_env().client(),
+            client=llm_client,
             repo_root=sandbox,
             profiles=loaded.profiles,
             allowed_verification_executables=loaded.allowed_executables,
             max_coding_attempts=2,
             max_review_rounds=2,
         )
-        result = pipeline.run(
-            job.request, base_branch=project.base_branch,
-            feature_branch=f"feature/django-{job.id.hex[:16]}",
-            push=False, create_pr=False,
-        )
+        # A single-job worker must not pass DeepSeek/API/database credentials to
+        # generated code or the core's verification subprocesses.
+        # This is defense in depth, not a substitute for an isolated OS worker.
+        with patch.dict(os.environ, private_environment(), clear=True):
+            result = pipeline.run(
+                job.request, base_branch=project.base_branch,
+                feature_branch=f"feature/django-{job.id.hex[:16]}",
+                push=False, create_pr=False,
+            )
         summary = {
             "core_status": result.status,
             "review": result.review.model_dump() if result.review else None,
