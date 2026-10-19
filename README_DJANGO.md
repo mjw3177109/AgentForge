@@ -224,3 +224,43 @@ systemd 服务模板现在默认引用 `v07_worker_settings`，缺少数据库
 环境变量会直接失败，不再偷偷使用本机 SQLite。
 这两份设置是部署准备文件，仍然需要用户已有的 VM、远程数据库、
 证书和网络访问控制才能真正启动常驻服务。
+
+
+## V0.8 · 候选补丁人工交付及执行锁诊断
+
+## V0.8 — candidate patch handoff and lease observation
+
+V0.8 adds a read-only superuser-only `GET /agentforge/jobs/<uuid>/candidate.patch`
+endpoint. It downloads a **candidate** patch, never applies, merges, publishes
+or modifies Git. Before returning bytes the server checks:
+
+- task mode AUTONOMOUS, final status PROPOSED, unbroken audit hash chain;
+- exact SHA-256 matches patch content and maximum 100 KB size;
+- original approver is still an active staff superuser;
+- original request and project configuration still match the human approval;
+- scope unchanged, source file manifest 1–3 existing .py paths within approved scope;
+- every patch header matches that original manifest;
+- two passing offline Docker check/test results with positive business test evidence;
+- result explicitly denies production release.
+
+Failure is 403. This is a protected source-code export for human review, not
+permission to run `git apply` automatically. Treat downloaded source as
+confidential. Immutable commit anchoring and patch review remain human tasks.
+
+Use `python examples/django_host/manage.py inspect_agentforge_leases --json`
+to inspect live/stale-looking project locks. The suspected-stale flag is based
+on **elapsed time only**, cannot prove a worker died, and never releases a
+lock or retries a task. The existing explicit operator recovery remains the
+only release path after an interrupted job.
+
+V0.8 also suppresses a late stale Worker's final_gate event after manual
+operator recovery. That worker's result is never resurrected. Do not run
+a recovery command while a Worker is still alive; process termination must
+be verified out-of-band.
+
+### Acceptance remains separate
+
+Django Python 3.11/3.12 unit tests and real Docker CI establish integration
+correctness. The real DeepSeek 3/3 gated workflow remains OFF unless the
+owner explicitly configures protected credentials and fee approval. No
+persistent external VM has been provisioned by this patch.

@@ -3,13 +3,14 @@
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import PermissionDenied
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .audit import verify_chain
 from .control import approve_pending_job, create_pending_job
+from .candidate_export import verified_patch
 from .evidence_export import export_summary
 from .forms import ApprovalForm, NewJobForm
 from .guard import BoundaryDenied
@@ -95,6 +96,11 @@ def job_detail(request, job_id):
         "independent_checks": checks.get("checks", []) if isinstance(checks, dict) else [],
         "patch_hash": job.result.get("patch_sha256", ""),
         "patch_available": bool(job.result.get("candidate_patch")),
+        "can_download_patch": (
+            request.user.is_superuser
+            and job.status == AgentJob.Status.PROPOSED
+            and bool(job.result.get("candidate_patch"))
+        ),
         "v06_budget": job.result.get("budget", {})
             if isinstance(job.result.get("budget"), dict) else {},
         "v06_repair_attempts": job.result.get("repair_attempts"),
@@ -142,4 +148,26 @@ def download_evidence(request, job_id):
     )
     response["Cache-Control"] = "no-store"
     response["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
+@staff_member_required
+@require_GET
+def download_candidate_patch(request, job_id):
+    _require_operator(request)
+    job = get_object_or_404(
+        AgentJob.objects.select_related("project").all(), pk=job_id
+    )
+    try:
+        patch = verified_patch(job)
+    except (BoundaryDenied, TypeError, ValueError) as exc:
+        raise PermissionDenied("Candidate integrity/approval gate denied") from exc
+    response = HttpResponse(patch, content_type="text/x-diff; charset=utf-8")
+    response["Content-Disposition"] = (
+        f'attachment; filename="agentforge-candidate-{job.pk}.patch"'
+    )
+    response["Cache-Control"] = "no-store"
+    response["X-Content-Type-Options"] = "nosniff"
+    response["X-AgentForge-Patch-SHA256"] = job.result["patch_sha256"]
+    response["X-AgentForge-Candidate-Only"] = "true"
     return response

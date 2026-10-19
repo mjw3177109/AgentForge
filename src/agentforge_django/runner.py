@@ -263,8 +263,8 @@ def _run_claimed_job(job):
                 "candidate_only": bool(result.get("candidate_only", False)),
             })
         else:
-            record(job, "final_gate", "BLOCKED", {
-                "failure_class": "STALE_WORKER_FINALIZATION_REJECTED",
-            })
+            # A recovered worker must not append new events after the operator
+            # has fenced its result. The recovery event is the terminal evidence.
+            pass
     job.refresh_from_db()
     return job

@@ -4,7 +4,11 @@
 <header><div><div class="eyebrow"><a class="link" href="{% url 'agentforge_django:dashboard' %}">项目总览</a> /
 <a class="link" href="{% url 'agentforge_django:project_detail' job.project.pk %}">{{ job.project.name }}</a> / JOB</div>
 <h1>任务详情</h1><div class="muted mono">{{ job.pk }}</div></div>
-{% if request.user.is_superuser %}<a class="button secondary" href="{% url 'agentforge_django:download_evidence' job.pk %}">导出脱敏验收证据 JSON</a>{% endif %}
+{% if request.user.is_superuser %}
+<div class="top-actions">
+<a class="button secondary" href="{% url 'agentforge_django:download_evidence' job.pk %}">导出脱敏验收证据 JSON</a>
+{% if can_download_patch %}<a class="button" href="{% url 'agentforge_django:download_candidate_patch' job.pk %}">下载候选补丁（不自动应用）</a>{% endif %}
+</div>{% endif %}
 </header>
 <div class="metrics">
 <div class="metric"><div class="metric-label">任务状态</div><div class="metric-number" style="font-size:22px"><span class="pill {{ job.status|lower }}">{{ job.status }}</span></div><div class="metric-note">AUDIT PASS 仅代表静态检查</div></div>
