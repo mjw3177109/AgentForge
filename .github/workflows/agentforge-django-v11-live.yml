@@ -1,0 +1,48 @@
+name: AgentForge Django V1.1 three-case REAL DeepSeek acceptance
+
+# Not started by a normal code push. Owner opt-in only.
+on:
+  push:
+    branches:
+      - feature/django-agent-manager-v1
+    paths:
+      - ".github/workflows/agentforge-django-v11-live.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentforge-django-v11-paid-live
+  cancel-in-progress: false
+
+jobs:
+  live-three-distinct-cases:
+    if: ${{ vars.AGENTFORGE_V07_PAID_LIVE == 'I_APPROVE_THREE_DEEPSEEK_RUNS' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      AGENTFORGE_LLM_API_KEY: ${{ secrets.AGENTFORGE_LLM_API_KEY }}
+      AGENTFORGE_LLM_BASE_URL: https://api.deepseek.com
+      AGENTFORGE_LLM_MODEL: deepseek-chat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Django benchmark
+        run: python -m pip install -e ".[dev,staging]"
+      - name: Require authorized real DeepSeek credentials
+        run: test -n "$AGENTFORGE_LLM_API_KEY"
+      - name: Build offline Docker verifier
+        run: docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+      - name: Execute three distinct REAL DeepSeek cases with independent validation
+        run: python scripts/run_django_v11_live.py --confirm-paid-calls --output artifacts/django-v11-live/report.json
+      - name: Archive redacted per-case evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentforge-v11-three-case-real-deepseek-evidence
+          path: artifacts/django-v11-live/report.json
+          if-no-files-found: warn
+          retention-days: 14

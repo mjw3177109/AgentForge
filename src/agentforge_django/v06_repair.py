@@ -8,6 +8,7 @@ import ast
 import difflib
 import hashlib
 import json
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -95,12 +96,20 @@ def _diff(original, changes):
 
 def _safe_outcome(result, *, attempt):
     checks = result.get("checks", [])
-    # Never send raw stdout/stderr, target secrets or test case content to model.
+    counts = []
+    for item in checks if isinstance(checks, list) else []:
+        if isinstance(item, dict):
+            raw = str(item.get("stdout", "")) + "\n" + str(item.get("stderr", ""))
+            counts.extend(int(n) for n in re.findall(
+                r"\bRan\s+([0-9]+)\s+tests?\b", raw,
+            ))
+    # Retain only numeric counts, not stdout/stderr or secrets.
     return {
         "attempt": attempt,
         "passed": result.get("passed") is True,
         "backend": result.get("backend"),
         "business_tests_executed": result.get("business_tests_executed") is True,
+        "business_test_count": max(counts, default=0),
         "checks": [{
             "success": check.get("success") is True,
             "reason": str(check.get("reason", ""))[:80],

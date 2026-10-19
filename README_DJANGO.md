@@ -348,3 +348,51 @@ Worker + Docker candidate-only loop, and core regression checks stay on.
 3/3 coding stability, not a dedicated external VM deployment, not a
 security-certified adversarial sandbox, and not production release permission.
 No `main` merge or paid model call is automatic.
+
+
+## V1.1 — 三类 Django 真实 Docker 基准与受控 DeepSeek 验收
+
+V1.0 已经完成了 Worker/审计权限加固。V1.1 的重点是**扩大真实业务验收覆盖度**，
+而不是把同一个 `add(a,b)` 简单算术题重复三次。
+
+新增固定合成基准（全部为新建的测试项目，不使用用户业务代码）：
+1. `arith-001`：正数、负数和零的计算；
+2. `pricing-002`：折扣金额、100%/0% 边界、整数舍入；
+3. `access-003`：对象拥有者、员工访问、未授权用户和匿名身份保护。
+
+三套原始程序必须各自先在 **真实离线 Docker** 中出现业务测试失败；
+之后每套由独立模型 Planner/Executor/Reviewer 或 Fixer 生成修复候选，
+重新进入独立 Docker 检查。只有至少分别通过 3、4、5 条真实业务测试，
+源代码与测试原件完全未改动、模型角色调用不超过每例 5 次，
+结果才是 `PASS`。每例都报告源代码/测试摘要及候选补丁哈希。
+
+在 GitHub Actions 或有 Docker 的环境先执行免费验收：
+
+```bash
+docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+python scripts/run_django_v11_offline.py
+```
+
+此命令仍使用 `SCRIPTED_FAKE_AGENT`，但 Django Docker 检查和业务测试
+是真实执行的；即使全部通过也不能把 `real_model_verified` 标记为真。
+
+明确同意 API 收费后，才允许配置真实 DeepSeek 环境变量并手工运行：
+
+```bash
+python scripts/run_django_v11_live.py --confirm-paid-calls \
+    --output artifacts/django-v11-live/report.json
+```
+
+三个不同案例需要 3–5 次角色 API 请求/例，最多 15 次逻辑请求。
+要求 `AGENTFORGE_LLM_API_KEY`、`AGENTFORGE_LLM_BASE_URL=https://api.deepseek.com`
+和 `AGENTFORGE_LLM_MODEL=deepseek-chat`，以及预构建的 Docker 验证镜像。
+付费的工作流 `agentforge-django-v11-live.yml` 额外受到 GitHub Repo 变量
+`AGENTFORGE_V07_PAID_LIVE=I_APPROVE_THREE_DEEPSEEK_RUNS` 门禁保护。
+默认 push 不触发付费任务。工作流通常需要位于 GitHub 默认分支才可直接
+使用 workflow_dispatch；本次不改动 main。
+
+验收分为 `模型/网络问题`、`Reviewer 拒绝`、`业务回归失败`、
+`验证环境问题`、`初始缺陷未复现` 等。
+输出仅包含脱敏的分数、计数、哈希和错误类别，不包含源代码、
+提示词、API 密钥及测试原始日志。**3/3 合成基准通过不等于实际业务项目已
+达到生产可用性，也不证明多租户恶意代码隔离。**

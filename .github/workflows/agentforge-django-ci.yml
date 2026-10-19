@@ -50,3 +50,5 @@ jobs:
         run: python scripts/run_django_v05_smoke.py
       - name: V0.6 bounded repair (3 simulated-agent runs, 2 real Docker verifications each)
         run: python scripts/run_django_v06_smoke.py
+      - name: V1.1 three DISTINCT Django benchmarks, with scripted agents and real Docker tests
+        run: python scripts/run_django_v11_offline.py
