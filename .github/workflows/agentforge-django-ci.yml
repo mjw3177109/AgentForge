@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install -e ".[dev]" "Django>=4.2,<6"
-      - run: python -m django check --settings=django_tests.settings
+      - run: python examples/django_host/manage.py check\n      - run: python -m django check --settings=django_tests.settings
       - run: python -m django makemigrations agentforge_django --check --dry-run --settings=django_tests.settings
       - run: python -m django test django_tests --settings=django_tests.settings -v 2
       - run: pytest -q

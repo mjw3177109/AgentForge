@@ -67,6 +67,19 @@ class JobTests(TestCase):
             job = AgentJob.objects.create(project=self.project)
             self.assertEqual(run_job(job.pk).status, AgentJob.Status.BLOCKED)
 
+    def test_zero_business_tests_are_not_pass(self):
+        (self.root / "manage.py").write_text(
+            "import sys\n"
+            "from pathlib import Path\n"
+            "Path('sandbox_marker.txt').write_text('executed')\n"
+            "print('Ran 0 tests' if 'test' in sys.argv else 'System check identified no issues')\n",
+            "utf-8",
+        )
+        job = AgentJob.objects.create(project=self.project, mode=AgentJob.Mode.VERIFY)
+        self.assertEqual(run_job(job.pk).status, AgentJob.Status.FAIL)
+        self.assertFalse((self.root / "sandbox_marker.txt").exists())
+        self.assertTrue(verify_chain(job))
+
     def test_staff_only_dashboard(self):
         self.assertEqual(self.client.get("/agentforge/").status_code, 302)
         user = get_user_model().objects.create_user("staff", password="test-pass", is_staff=True)

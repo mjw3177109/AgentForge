@@ -1,6 +1,7 @@
 """Run independent Django checks in a disposable copy, never the original workspace."""
 
 import shutil
+import re
 import subprocess
 import sys
 import tempfile
@@ -51,6 +52,13 @@ def run_django_checks(root: Path, with_tests=True, timeout=180):
         except subprocess.TimeoutExpired:
             item = {"argv": ["python", *argv[1:]], "success": False,
                     "reason": "TIMEOUT", "timeout_seconds": timeout}
+        # Django's test command exits successfully even when it discovers ZERO tests.
+        # Never present that as independently proven business correctness.
+        if with_tests and "test" in argv and item["success"]:
+            output = item.get("stdout", "") + "\n" + item.get("stderr", "")
+            if re.search(r"\b(?:Ran|Found) 0 tests?\b", output):
+                item["success"] = False
+                item["reason"] = "NO_BUSINESS_TESTS"
         evidence.append(item)
         if not item["success"]:
             break

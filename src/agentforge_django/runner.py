@@ -6,7 +6,6 @@ import tempfile
 from pathlib import Path
 
 from django.conf import settings
-from django.db import transaction
 from django.utils import timezone
 
 from .audit import record
@@ -114,6 +113,10 @@ def _autonomous(job, root):
                {"checks": [{"argv": c["argv"], "success": c["success"]}
                            for c in independent["checks"]]})
         summary["independent_verification"] = independent
+        if not project.run_business_tests:
+            # Explicitly configured unit/behavioral tests are mandatory for auto-code acceptance.
+            return AgentJob.Status.BLOCKED, {
+                **summary, "reason": "Business test gate disabled; cannot propose autonomous patch"}
         if not independent["passed"]:
             return AgentJob.Status.FAIL, summary
         patch = _git(sandbox, "diff", "--binary",

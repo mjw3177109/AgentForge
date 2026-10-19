@@ -1,6 +1,4 @@
-from django.contrib import admin, messages
-from django.db.models import F
-from django.utils.html import format_html
+from django.contrib import admin
 
 from .models import AgentJob, AuditEvent, ManagedProject, MutationApproval
 
@@ -37,6 +35,7 @@ class AgentJobAdmin(admin.ModelAdmin):
 class MutationApprovalAdmin(admin.ModelAdmin):
     list_display = ("job", "approved_by", "base_commit", "approved_at")
     readonly_fields = ("approved_at",)
+    exclude = ("approved_by",)
 
     def save_model(self, request, obj, form, change):
         if change:

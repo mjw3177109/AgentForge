@@ -99,3 +99,11 @@ python -m pytest -q
 A 3/3 real DeepSeek multi-round stability PASS for **this Django host** has NOT
 been established by the present framework. The original synthetic V2.0
 acceptance evidence does not automatically transfer to another Django business app.
+
+## Ready-to-run demo
+
+An example Django host lives in examples/django_host. It provides the Django admin,
+AgentForge dashboard and a simple isolated SQLite host DB. It does not change or
+connect to any other project until AGENTFORGE_ALLOWED_ROOTS is explicitly set.
+
+Use this for development / demos only. It is NOT a production-hardened web service.

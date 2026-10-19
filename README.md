@@ -29,3 +29,10 @@ python protocol_bundle/scripts/validate_protocol.py
 ## Engineering rule
 
 > 不知道就停；有依据才改；测试通过才完成；合并之后才记忆。
+
+## Django auxiliary manager (optional branch)
+
+This branch adds an installable agentforge_django App and a small demo host under
+examples/django_host. Read docs/DJANGO_AGENT_MANAGER.md or README_DJANGO.md.
+Existing AgentForge core is preserved. Autonomous mutation remains opt-in and
+candidate patches are NEVER deployed by the addon.

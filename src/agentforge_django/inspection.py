@@ -10,7 +10,7 @@ from .guard import BLOCKED_SEGMENTS, BLOCKED_FILES, BoundaryDenied, scoped_file
 def inspect_python(root: Path, max_files=750, max_bytes=512_000):
     findings = []
     scanned = 0
-    django_detected = False
+    django_detected = (root / "manage.py").is_file() and not (root / "manage.py").is_symlink()
     for directory, subdirs, files in os.walk(root, followlinks=False):
         subdirs[:] = sorted(
             d for d in subdirs
@@ -20,8 +20,6 @@ def inspect_python(root: Path, max_files=750, max_bytes=512_000):
         for name in sorted(files):
             if scanned >= max_files:
                 raise BoundaryDenied("Static scan limit reached; narrow the repository")
-            if name == "manage.py":
-                django_detected = True
             if not name.endswith(".py") or name.lower() in BLOCKED_FILES:
                 continue
             absolute = Path(directory) / name
