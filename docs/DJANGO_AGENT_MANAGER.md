@@ -1,4 +1,4 @@
-# AgentForge Django Agent Manager V0.2
+# AgentForge Django Agent Manager V0.3
 
 ## Positioning
 
@@ -151,3 +151,71 @@ cannot become PASS.
 Release, PR push, original project code mutation and production DB access remain
 outside the V0.2 automation permission boundary. The worker must run in a sandboxed
 VM/container for untrusted target projects. The SQLite demo is for development.
+
+
+## V0.3 — Agent Control Center (additive UI, no code execution via HTTP)
+
+V0.3 introduces the staff read-only web Control Center, and explicit
+superuser-only task submission, human approval and *redacted* evidence export.
+
+### Entry points
+
+- GET `/agentforge/`: fleet health, last 30 tasks, observed activity.
+- GET `/agentforge/projects/<int:project_id>/`: project health, worker lock and recent jobs.
+- GET/POST `/agentforge/jobs/new/`: superuser-only form that creates a PENDING job.
+- GET `/agentforge/jobs/<uuid:job_id>/`: static job status and audit timeline.
+- POST `/agentforge/jobs/<uuid:job_id>/approve/`: superuser-only human approval.
+- GET `/agentforge/jobs/<uuid:job_id>/evidence.json`: superuser-only sanitized evidence export.
+
+All authenticated staff members have read-only access to general dashboard and
+task summaries, but **only an active superuser** can create jobs, approve autonomous
+work, or export machine-readable evidence. Use a separate access-controlled host
+or alter read permissions if sensitive project names must not be visible to all staff.
+
+A POST to create a job does **not** execute any task. The worker still runs separately
+using `run_agentforge_job` or `process_agentforge_queue` from V0.2.
+No web endpoint invokes DeepSeek, subprocess, shell commands for task execution,
+merges, migrations on target projects, or production deployment. Approval performs a
+short read-only Git/policy preflight; it is **not** an Agent execution endpoint.
+
+### Approval flow
+
+A human approval now requires ALL of:
+
+1. Logged-in, active Django superuser with CSRF-protected POST and explicit
+   acknowledgement that only a candidate patch is authorized.
+2. Job in PENDING / AUTONOMOUS, with no prior approval.
+3. `AGENTFORGE_ALLOW_AUTONOMOUS=True`, project autonomous switch enabled,
+   project enabled and independent business testing not disabled.
+4. Project root within `AGENTFORGE_ALLOWED_ROOTS`; non-symlink profile file.
+5. Clean Git working tree, exact base branch at current HEAD, 40-character commit.
+6. At least one configured execution profile and every write scope contained
+   by the explicitly configured project write scope.
+
+A successful approval pins exact Git HEAD, project settings, job contents and
+allowed scopes, with a hash-linked event. A later request/policy change invalidates
+the existing approval in the Worker gate, and a second approval cannot silently
+replace it. Admin's direct creation of MutationApproval is disabled, so human
+preflight cannot be bypassed through its standard Add form.
+
+### Evidence export
+
+JSON contains event sequence/hash information, job result status, sanitized test
+success/return codes and optional candidate patch SHA-256. It explicitly excludes
+raw source diffs, file contents, stdout/stderr, model prompts, model API keys and
+full stack traces; `Cache-Control: no-store` is enforced.
+
+The HTTP interface is not an OS-level security boundary and does not make
+VERIFY or AUTONOMOUS execution safe on production hosts. Run target manage.py and
+any AI-generated verification commands in a tightly constrained external worker
+container or VM. Keep the default demo host settings development-only.
+
+### Verification
+
+Use `python -m django test django_tests --settings=django_tests.settings -v 2`.
+V0.3 has test cases covering staff/superuser separation, CSRF, disabled projects,
+authorization, approval preflight, idempotence and redacted export. Django+core CI
+must PASS before classifying V0.3 as a tested development build.
+
+No paid DeepSeek 3/3 stability testing, production service-level verification, or
+secure hostile-code container isolation is claimed in V0.3.

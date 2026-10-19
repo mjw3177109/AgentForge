@@ -36,3 +36,11 @@ This branch adds an installable agentforge_django App and a small demo host unde
 examples/django_host. Read docs/DJANGO_AGENT_MANAGER.md or README_DJANGO.md.
 Existing AgentForge core is preserved. Autonomous mutation remains opt-in and
 candidate patches are NEVER deployed by the addon.
+
+
+## V0.3 Django Control Center
+
+See [README_DJANGO.md](README_DJANGO.md) for a runnable Django host and
+[docs/DJANGO_AGENT_MANAGER.md](docs/DJANGO_AGENT_MANAGER.md) for security gates.
+This version adds staff-readable dashboards and superuser-only intake/approval/
+sanitized evidence endpoints. No autonomous code runs through HTTP endpoints.

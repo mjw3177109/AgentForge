@@ -1,36 +1,30 @@
-<!doctype html>
-<html lang="zh-CN">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AgentForge · Django V0.2</title>
-<style>
-body{font:15px/1.6 system-ui,sans-serif;background:#f7f9fc;color:#1b293d;max-width:1100px;margin:40px auto;padding:0 20px}
-h1{font-size:26px}.hint{color:#596982}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
-.card{padding:18px;border:1px solid #dae0ea;background:#fff;border-radius:12px}.number{font-size:26px;font-weight:700}
-table{width:100%;border-collapse:collapse;background:white;border-radius:12px;overflow:hidden}
-td,th{text-align:left;padding:12px;border-bottom:1px solid #e5e9ef}
-a{color:#245fc2} .small{font-size:12px;color:#5d6b80}
-@media(max-width:680px){.cards{grid-template-columns:1fr}table{font-size:12px}}
-</style></head><body>
-<h1>AgentForge · Django 项目管控 V0.2</h1>
-<p class="hint">默认只读 · 强制独立门禁 · 不自动发布。状态仅表示已运行的检查，不能代替生产验收。</p>
-<div class="cards">
-<div class="card"><div class="small">已登记项目</div><div class="number">{{ total_projects }}</div></div>
-<div class="card"><div class="small">需关注项目</div><div class="number">{{ attention_projects }}</div></div>
-<div class="card"><div class="small">最近 30 天有真实测试证据的项目</div><div class="number">{{ verified_projects }}</div></div>
+{% extends "agentforge_django/base.html" %}
+{% block title %}项目总览 · AgentForge{% endblock %}
+{% block content %}
+<header><div><div class="eyebrow">OVERVIEW / MULTI-PROJECT</div><h1>工程项目控制中心</h1>
+<div class="muted">跨 Django 工程的可信辅助管理。所有指标只代表已记录任务，非生产稳定性证明。</div></div>
+{% if request.user.is_superuser %}<a class="button" href="{% url 'agentforge_django:new_job' %}">＋ 新建 Agent 任务</a>{% endif %}
+</header>
+<div class="metrics">
+<div class="metric"><div class="metric-label">已登记项目（最多展示 100 个）</div><div class="metric-number">{{ total_projects }}</div><div class="metric-note">默认未授权</div></div>
+<div class="metric"><div class="metric-label">需要关注</div><div class="metric-number">{{ attention_projects }}</div><div class="metric-note">最近 30 天存在失败或阻断</div></div>
+<div class="metric"><div class="metric-label">最近通过业务验收</div><div class="metric-number">{{ verified_projects }}</div><div class="metric-note">最近 30 天 VERIFY 证据；不保证代码未变化</div></div>
 </div>
-<h2>项目健康度 · 最近 30 天</h2>
-<table><tr><th>项目</th><th>状态</th><th>观察到的任务完成率</th><th>业务测试验证</th></tr>
-{% for row in health_rows %}
-<tr><td>{{ row.project.name }}</td><td>{{ row.state }}</td>
-<td>{% if row.observed_completion_pct is not None %}{{ row.observed_completion_pct }}%{% else %}未有完成记录{% endif %}</td>
-<td>{% if row.verified_business_tests %}最近一次 VERIFY 通过{% else %}尚无通过记录{% endif %}</td></tr>
-{% empty %}<tr><td colspan="4">暂无项目</td></tr>{% endfor %}</table>
-<h2>最近任务</h2>
-<table><tr><th>任务</th><th>项目</th><th>模式</th><th>状态</th><th>创建时间</th></tr>
-{% for job in jobs %}
-<tr><td><a href="{% url 'agentforge_django:job_detail' job.pk %}">{{ job.pk }}</a></td>
-<td>{{ job.project.name }}</td><td>{{ job.mode }}</td><td>{{ job.status }}</td><td>{{ job.created_at }}</td></tr>
-{% empty %}<tr><td colspan="5">暂无任务</td></tr>{% endfor %}
-</table>
-<p><a href="/admin/agentforge_django/">进入 Django Admin 管理项目、任务与审批</a></p>
-</body></html>
+<section class="panel"><div class="panel-header"><h2>项目健康度</h2><span class="muted tiny">最近 30 天</span></div>
+<div class="table-wrap"><table><thead><tr><th>项目</th><th>状态</th><th>完成率（观察值）</th><th>验证</th><th>操作</th></tr></thead>
+<tbody>{% for row in health_rows %}
+<tr><td><strong>{{ row.project.name }}</strong></td>
+<td><span class="pill {% if row.state == 'VERIFIED_TESTS' %}verified{% elif row.state == 'ATTENTION' %}attention{% elif row.state == 'DISABLED' %}off{% endif %}">{{ row.state }}</span></td>
+<td>{% if row.observed_completion_pct is not None %}{{ row.observed_completion_pct }}%{% else %}—{% endif %}</td>
+<td>{% if row.verified_business_tests %}<span class="pill pass">近期 VERIFY PASS</span>{% else %}<span class="muted">未验证</span>{% endif %}</td>
+<td><a class="link" href="{% url 'agentforge_django:project_detail' row.project.pk %}">查看项目 →</a></td></tr>
+{% empty %}<tr><td colspan="5" class="empty">尚未登记项目。请先通过 Django Admin 配置受信任项目目录。</td></tr>{% endfor %}</tbody>
+</table></div></section>
+<section class="panel"><div class="panel-header"><h2>最近任务</h2><span class="muted tiny">最近 30 项</span></div>
+<div class="table-wrap"><table><thead><tr><th>任务 ID</th><th>项目</th><th>模式</th><th>状态</th><th>创建时间</th></tr></thead>
+<tbody>{% for job in jobs %}<tr>
+<td><a class="link mono" href="{% url 'agentforge_django:job_detail' job.pk %}">{{ job.pk|truncatechars:18 }}</a></td>
+<td>{{ job.project.name }}</td><td>{{ job.mode }}</td>
+<td><span class="pill {{ job.status|lower }}">{{ job.status }}</span></td><td>{{ job.created_at|date:"Y-m-d H:i" }}</td>
+</tr>{% empty %}<tr><td colspan="5" class="empty">暂无任务。创建任务不会自动执行代码。</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

@@ -1,0 +1,19 @@
+{% extends "agentforge_django/base.html" %}
+{% block title %}新建任务 · AgentForge{% endblock %}
+{% block content %}
+<header><div><div class="eyebrow"><a class="link" href="{% url 'agentforge_django:dashboard' %}">项目总览</a> / CREATE JOB</div>
+<h1>创建 Agent 任务</h1>
+<div class="muted">本页面只把任务写入队列。执行由隔离 Worker 的管理命令控制。</div>
+</div></header>
+<section class="panel" style="max-width:730px">
+<form method="post" action="{% url 'agentforge_django:new_job' %}">{% csrf_token %}
+{{ form.non_field_errors }}
+{% for field in form %}
+<div class="field"><label for="{{ field.id_for_label }}">{{ field.label }}</label>
+{{ field }}{% for error in field.errors %}<div class="error">{{ error }}</div>{% endfor %}</div>
+{% endfor %}
+<div class="notice"><strong>权限门禁：</strong>AUDIT 仅静态检查；VERIFY 会运行目标项目代码，必须在安全 Worker 中进行；AUTONOMOUS 还需要独立人类审批且不会自动发布。</div>
+<div class="top-actions"><button type="submit">提交 PENDING 任务</button>
+<a class="button secondary" href="{% url 'agentforge_django:dashboard' %}">取消</a></div>
+</form></section>
+{% endblock %}

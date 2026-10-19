@@ -40,3 +40,22 @@ Django 业务测试；`--include-autonomous` 还需要人工审批和全局授�
 清理占用；中断的运行任务会标记 BLOCKED，不自动重试。
 
 旧版审批不会自动继承授权，须重新申请并使用新任务。
+
+
+## V0.3 — Agent Control Center
+
+升级后不需要新的数据库迁移（沿用 V0.2 Schema）。
+
+在 `http://127.0.0.1:8000/agentforge/` 查看新版控制中心：
+- 项目总览：近期任务、状态、历史验证证据；
+- 项目详情：独占执行锁、权限配置、对应任务；
+- 任务详情：审计时间线、审批状态、独立验收结果；
+- 仅超级管理员：创建待执行任务、受限人工审批、下载脱敏 JSON 证据。
+
+**重要：** 网页只创建 PENDING 任务和写入受限审批记录，不调用 DeepSeek
+执行代码。仍然必须由外部 Worker / 管理命令处理：
+`python examples/django_host/manage.py process_agentforge_queue --max-jobs 5`
+
+如要提交 AUTONOMOUS 任务，需要全局开关、项目开关、干净的 Git 工作树、
+任务权限 YAML 和独立业务测试策略都满足限制；审批仅授权生成待审补丁。
+模板与测试都不声明已经满足生产级隔离或真实 DeepSeek 三轮稳定性验收。

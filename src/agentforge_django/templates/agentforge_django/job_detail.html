@@ -1,25 +1,56 @@
-<!doctype html><html lang="zh-CN"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>AgentForge · Job {{ job.pk }}</title>
-<style>body{font:15px/1.6 system-ui,sans-serif;color:#1b293d;max-width:980px;margin:40px auto;padding:0 20px;background:#f7f9fc}
-section{padding:16px 20px;background:#fff;border:1px solid #dbe2eb;border-radius:12px;margin:16px 0}
-table{width:100%;border-collapse:collapse}td,th{text-align:left;padding:10px;border-bottom:1px solid #e5e9ef}
-a{color:#245fc2}.hint{color:#63728a}.mono{font-family:monospace;overflow-wrap:anywhere}</style></head>
-<body><a href="{% url 'agentforge_django:dashboard' %}">← 返回项目总览</a>
-<h1>任务详情</h1><section>
-<p><strong>任务 ID：</strong><span class="mono">{{ job.pk }}</span></p>
-<p><strong>项目：</strong>{{ job.project.name }} · <strong>模式：</strong>{{ job.mode }}</p>
-<p><strong>状态：</strong>{{ job.status }} · <strong>事件哈希链：</strong>{% if audit_chain_ok %}校验通过{% else %}校验失败{% endif %}</p>
-{% if failure_class %}<p><strong>失败分类：</strong>{{ failure_class }}</p>{% endif %}
-{% if failure_reason %}<p><strong>原因：</strong>{{ failure_reason }}</p>{% endif %}
-{% if patch_available %}<p><strong>补丁状态：</strong>候选补丁，未发布；仅授权管理员可从受保护存储查询。</p>
-<p><strong>补丁 SHA-256：</strong><span class="mono">{{ patch_hash }}</span></p>{% endif %}
+{% extends "agentforge_django/base.html" %}
+{% block title %}任务 {{ job.pk }} · AgentForge{% endblock %}
+{% block content %}
+<header><div><div class="eyebrow"><a class="link" href="{% url 'agentforge_django:dashboard' %}">项目总览</a> /
+<a class="link" href="{% url 'agentforge_django:project_detail' job.project.pk %}">{{ job.project.name }}</a> / JOB</div>
+<h1>任务详情</h1><div class="muted mono">{{ job.pk }}</div></div>
+{% if request.user.is_superuser %}<a class="button secondary" href="{% url 'agentforge_django:download_evidence' job.pk %}">导出脱敏验收证据 JSON</a>{% endif %}
+</header>
+<div class="metrics">
+<div class="metric"><div class="metric-label">任务状态</div><div class="metric-number" style="font-size:22px"><span class="pill {{ job.status|lower }}">{{ job.status }}</span></div><div class="metric-note">AUDIT PASS 仅代表静态检查</div></div>
+<div class="metric"><div class="metric-label">任务模式</div><div class="metric-number" style="font-size:22px">{{ job.mode }}</div><div class="metric-note">代码运行只能通过独立 Worker</div></div>
+<div class="metric"><div class="metric-label">审计链</div><div class="metric-number" style="font-size:22px">{% if audit_chain_ok %}校验通过{% else %}校验失败{% endif %}</div>
+<div class="metric-note">哈希链不等同防 DB 管理员篡改</div></div>
+</div>
+<div class="grid-2">
+<section class="panel"><div class="panel-header"><h2>任务摘要</h2></div>
+<div class="fact"><span class="fact-name">项目</span><a class="link" href="{% url 'agentforge_django:project_detail' job.project.pk %}">{{ job.project.name }}</a></div>
+<div class="fact"><span class="fact-name">创建日期</span><span>{{ job.created_at|date:"Y-m-d H:i:s" }}</span></div>
+<div class="fact"><span class="fact-name">开始 / 完成</span><span>{% if job.started_at %}{{ job.started_at|date:"m-d H:i" }}{% else %}—{% endif %} /
+{% if job.finished_at %}{{ job.finished_at|date:"m-d H:i" }}{% else %}—{% endif %}</span></div>
+<div class="fact"><span class="fact-name">项目执行锁</span><strong>{% if busy %}已占用{% else %}空闲{% endif %}</strong></div>
+{% if failure_class %}<div class="fact"><span class="fact-name">失败类别</span><strong>{{ failure_class }}</strong></div>{% endif %}
+{% if failure_reason %}<p class="error">{{ failure_reason }}</p>{% endif %}
+{% if patch_available %}<p class="notice">候选补丁已生成，仍未合并或发布。SHA-256：<span class="mono">{{ patch_hash }}</span></p>{% endif %}
 </section>
-<h2>独立验证</h2><section><table><tr><th>执行命令</th><th>结果</th></tr>
-{% for check in independent_checks %}<tr><td class="mono">{{ check.argv|join:" " }}</td><td>{% if check.success %}PASS{% else %}FAIL{% endif %}</td></tr>
-{% empty %}<tr><td colspan="2">NOT_RUN / 无独立验证证据</td></tr>{% endfor %}</table></section>
-<h2>审计时间线</h2><section><table><tr><th>序号</th><th>阶段</th><th>决策</th><th>时间</th></tr>
-{% for event in events %}<tr><td>{{ event.sequence }}</td><td>{{ event.phase }}</td><td>{{ event.decision }}</td><td>{{ event.created_at }}</td></tr>
-{% empty %}<tr><td colspan="4">暂无事件</td></tr>{% endfor %}</table></section>
-<p class="hint">本页面不执行代码、不提供部署或数据库写入操作。</p>
-</body></html>
+<section class="panel"><div class="panel-header"><h2>人工审批</h2></div>
+{% if approval %}<div class="notice success">已授权生成候选补丁；绝不等同生产发布授权。</div>
+<div class="fact"><span class="fact-name">审批人</span><strong>{{ approval.approved_by.username }}</strong></div>
+<div class="fact"><span class="fact-name">锁定提交</span><span class="mono">{{ approval.base_commit|truncatechars:20 }}</span></div>
+<div class="fact"><span class="fact-name">已批准范围</span><strong>{{ approval.approved_scopes|length }} 条</strong></div>
+{% elif can_approve %}
+<form method="post" action="{% url 'agentforge_django:approve_job' job.pk %}">{% csrf_token %}
+{{ approval_form.non_field_errors }}
+{% for field in approval_form %}<div class="field">
+{% if field.name == 'acknowledge' %}<label>{{ field }} {{ field.label }}</label>
+{% else %}<label for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% endif %}
+{% for error in field.errors %}<span class="error">{{ error }}</span>{% endfor %}
+</div>{% endfor %}
+<button type="submit">提交受限审批</button></form>
+<p class="help">审批前将验证 Git HEAD、工作树清洁、执行配置及写入白名单。</p>
+{% else %}<p class="muted">未审批、无需审批或当前状态不允许审批。</p>{% endif %}
+</section></div>
+<section class="panel"><div class="panel-header"><h2>独立验证</h2></div>
+<div class="table-wrap"><table><thead><tr><th>验证执行</th><th>结果</th></tr></thead><tbody>
+{% for check in independent_checks %}<tr>
+<td class="mono">{{ check.argv|join:" " }}</td>
+<td><span class="pill {% if check.success %}pass{% else %}fail{% endif %}">{% if check.success %}PASS{% else %}FAIL{% endif %}</span></td></tr>
+{% empty %}<tr><td colspan="2" class="empty">NOT_RUN · 没有独立验证证据</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="panel"><div class="panel-header"><h2>审计时间线</h2><span class="muted tiny">按事件序号记录</span></div>
+<div class="timeline">{% for event in events %}<div class="timeline-item">
+<strong>{{ event.phase }} · {{ event.decision }}</strong>
+<div class="muted tiny">#{{ event.sequence }} · {{ event.created_at|date:"Y-m-d H:i:s" }}</div></div>
+{% empty %}<p class="muted">暂无审计事件</p>{% endfor %}</div>
+</section>
+{% endblock %}

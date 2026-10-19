@@ -1,0 +1,35 @@
+{% extends "agentforge_django/base.html" %}
+{% block title %}{{ project.name }} · AgentForge{% endblock %}
+{% block content %}
+<header><div><div class="eyebrow"><a class="link" href="{% url 'agentforge_django:dashboard' %}">项目总览</a> / PROJECT</div><h1>{{ project.name }}</h1>
+<div class="muted">仅显示 Agent 管理层的审计信息，不修改原 Django 项目。</div></div>
+{% if request.user.is_superuser and project.enabled %}
+<a class="button" href="{% url 'agentforge_django:new_job' %}?project={{ project.pk }}">＋ 创建任务</a>{% endif %}
+</header>
+<div class="metrics">
+<div class="metric"><div class="metric-label">健康状态</div><div class="metric-number" style="font-size:20px">{{ health.state }}</div><div class="metric-note">最近 30 天的已记录结果</div></div>
+<div class="metric"><div class="metric-label">最近任务完成率</div><div class="metric-number">{% if health.observed_completion_pct is not None %}{{ health.observed_completion_pct }}%{% else %}—{% endif %}</div><div class="metric-note">不代表模型总体稳定性</div></div>
+<div class="metric"><div class="metric-label">项目执行锁</div><div class="metric-number" style="font-size:20px">{% if busy %}已占用{% else %}空闲{% endif %}</div><div class="metric-note">异常占用请通过 CLI 人工确认后恢复</div></div>
+</div>
+<div class="grid-2">
+<section class="panel"><div class="panel-header"><h2>权限与运行配置</h2></div>
+<div class="fact"><span class="fact-name">项目启用</span><strong>{{ project.enabled|yesno:"是,否" }}</strong></div>
+<div class="fact"><span class="fact-name">自治执行</span><strong>{{ project.autonomous_enabled|yesno:"项目已授权,关闭" }}</strong></div>
+<div class="fact"><span class="fact-name">业务测试</span><strong>{{ project.run_business_tests|yesno:"必选,禁用" }}</strong></div>
+<div class="fact"><span class="fact-name">基础分支</span><span class="mono">{{ project.base_branch }}</span></div>
+<div class="fact"><span class="fact-name">写入白名单条数</span><strong>{{ project.write_scopes|length }}</strong></div>
+</section>
+<section class="panel"><div class="panel-header"><h2>门禁状态</h2></div>
+<p class="muted">AUDIT：只读静态检查，不能证明业务正确。</p>
+<p class="muted">VERIFY：隔离副本内运行 Django 检查和业务测试。</p>
+<p class="muted">AUTONOMOUS：需要人工审批，结果仅为候选补丁。</p>
+<div class="notice">未授权推送、合并、数据库迁移或生产发布。</div>
+</section></div>
+<section class="panel"><div class="panel-header"><h2>该项目最近任务</h2></div><div class="table-wrap">
+<table><thead><tr><th>ID</th><th>模式</th><th>状态</th><th>创建时间</th></tr></thead>
+<tbody>{% for job in jobs %}<tr>
+<td><a class="link mono" href="{% url 'agentforge_django:job_detail' job.pk %}">{{ job.pk|truncatechars:18 }}</a></td>
+<td>{{ job.mode }}</td><td><span class="pill {{ job.status|lower }}">{{ job.status }}</span></td>
+<td>{{ job.created_at|date:"Y-m-d H:i" }}</td></tr>
+{% empty %}<tr><td colspan="4" class="empty">该项目尚无任务</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}
