@@ -264,3 +264,43 @@ Django Python 3.11/3.12 unit tests and real Docker CI establish integration
 correctness. The real DeepSeek 3/3 gated workflow remains OFF unless the
 owner explicitly configures protected credentials and fee approval. No
 persistent external VM has been provisioned by this patch.
+
+
+## V0.9 — durable PostgreSQL worker heartbeat and bounded supervisor
+
+V0.9 adds `JobLease.heartbeat_at` via migration 0004, and a dedicated
+PostgreSQL heartbeat thread for **trusted Worker processes only**.
+The remote worker settings turn it on (10s interval), while the
+temporary GitHub CI worker uses a 1-second interval and verifies the
+heartbeat independently alongside real Docker tests.
+
+The heartbeat updates only the row matching the exact job and immutable
+owner token. If the row disappears or its status ceases to be RUNNING,
+the heartbeat is marked lost and finalization fails closed: no PASS or
+PROPOSED status is permitted. PostgreSQL error or stopped heartbeat
+also blocks finalization. Legacy SQLite demo remains heartbeat OFF;
+attempting to enable heartbeat in SQLite is rejected before claiming a job.
+
+`inspect_agentforge_leases --json` now reports `heartbeat_age_seconds`
+and liveness `RECENT_HEARTBEAT`, `HEARTBEAT_OVERDUE_CHECK_PROCESS`, or
+`UNKNOWN_LEGACY_NO_HEARTBEAT`, alongside lock age. Heartbeat staleness
+is NOT proof a process died. No automatic lease stealing or retry exists.
+
+For a dedicated Linux VM, an optional bounded **one-job** supervisor is
+available:
+
+```bash
+python examples/django_host/manage.py supervise_agentforge_job <UUID> --timeout-seconds 900
+```
+
+It requires `AGENTFORGE_WORKER_ROLE=trusted-dedicated`, dedicated worker
+settings, and PostgreSQL heartbeat enabled. It starts a child process and
+terminates its Unix process group after timeout. The supervisor does NOT
+reclaim the lease, retry, or assert Docker containers have terminated:
+the Docker daemon may continue a container after its CLI exits. A human
+operator must verify process/container state before using the existing
+explicit `recover_agentforge_job` operation.
+
+This is a reliability and fencing improvement, NOT a claim of hostile-code
+microVM sandboxing or persistent VM deployment. The source/DeepSeek data
+transfer permissions remain OFF unless explicitly authorized.

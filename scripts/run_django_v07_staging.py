@@ -196,6 +196,8 @@ def main():
             "source_repo_unchanged": project_file_unchanged,
             "candidate_download_integrity_ok": export_ok,
             "candidate_git_apply_check_only": apply_check_ok,
+            "v09_heartbeat": job.result.get("worker_heartbeat", {}),
+            "heartbeat_beats_observed": job.result.get("worker_heartbeat", {}).get("beats", 0) >= 1,
             "real_deepseek_tested": False,
             "persistent_remote_worker_deployed": False,
             "production_release_authorized": False,
@@ -207,6 +209,7 @@ def main():
             and project_file_unchanged
             and evidence["audit_hash_chain_valid"]
             and export_ok and apply_check_ok
+            and evidence["heartbeat_beats_observed"]
         ):
             raise SystemExit(2)
 

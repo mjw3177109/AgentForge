@@ -9,7 +9,7 @@ import tempfile
 from pathlib import Path
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, transaction, connection
 from django.utils import timezone
 
 from .audit import record
@@ -19,6 +19,7 @@ from .guard import (
 )
 from .inspection import inspect_python, sanitized_manifest
 from .models import AgentJob, JobLease
+from .lease_heartbeat import LeaseHeartbeat, lease_owned
 from .planning import advisor
 from .verification import isolated_verification
 
@@ -181,6 +182,8 @@ def run_job(job_id):
     job = AgentJob.objects.select_related("project").get(pk=job_id)
     if job.status != AgentJob.Status.PENDING:
         return job
+    if getattr(settings, "AGENTFORGE_V09_HEARTBEAT_ENABLED", False) and connection.vendor != "postgresql":
+        raise BoundaryDenied("V0.9 trusted worker heartbeat requires PostgreSQL")
     token = uuid.uuid4()
     try:
         with transaction.atomic():
@@ -196,12 +199,32 @@ def run_job(job_id):
         if not claimed:
             job.refresh_from_db()
             return job
-        return _run_claimed_job(job)
+        heartbeat = LeaseHeartbeat(
+            job_id=job.pk, project_id=job.project_id, token=token,
+        )
+        try:
+            heartbeat.start()
+        except Exception as exc:
+            AgentJob.objects.filter(pk=job.pk, status=AgentJob.Status.RUNNING).update(
+                status=AgentJob.Status.BLOCKED,
+                result={"failure_class": "HEARTBEAT_START_FAILED",
+                        "error_type": type(exc).__name__},
+                finished_at=timezone.now(),
+            )
+            record(job, "final_gate", "BLOCKED", {
+                "failure_class": "HEARTBEAT_START_FAILED",
+            })
+            job.refresh_from_db()
+            return job
+        try:
+            return _run_claimed_job(job, token=token, heartbeat=heartbeat)
+        finally:
+            heartbeat.stop()
     finally:
         JobLease.objects.filter(project=job.project, owner_token=token).delete()
 
 
-def _run_claimed_job(job):
+def _run_claimed_job(job, *, token=None, heartbeat=None):
     """Finalize status and audit even if the execution fails."""
     status, result = AgentJob.Status.BLOCKED, {}
     try:
@@ -252,6 +275,23 @@ def _run_claimed_job(job):
         status, result = AgentJob.Status.FAIL, {
             "failure_class": "RUNTIME_OR_ENVIRONMENT", "error_type": type(exc).__name__}
     finally:
+        if heartbeat is not None:
+            heartbeat.stop()
+            if not isinstance(result, dict):
+                result = {"failure_class": "INVALID_EXECUTION_RESULT"}
+            result["worker_heartbeat"] = {
+                "enabled": bool(getattr(settings, "AGENTFORGE_V09_HEARTBEAT_ENABLED", False)),
+                "beats": heartbeat.beats,
+                "ownership_preserved": not heartbeat.lost.is_set(),
+            }
+        if token is not None and (
+            (heartbeat is not None and heartbeat.lost.is_set())
+            or not lease_owned(project_id=job.project_id, job_id=job.pk, token=token)
+        ):
+            status, result = AgentJob.Status.BLOCKED, {
+                "failure_class": "WORKER_LEASE_LOST",
+                "reason": "Worker ownership or heartbeat lost; never publish candidate",
+            }
         finalized = AgentJob.objects.filter(
             pk=job.pk, status=AgentJob.Status.RUNNING
         ).update(status=status, result=result, finished_at=timezone.now())
