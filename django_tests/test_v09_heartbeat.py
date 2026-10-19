@@ -22,6 +22,38 @@ class HeartbeatContractTests(TestCase):
         )
         self.lease = JobLease.objects.create(project=self.project, job=self.job)
 
+    def test_lost_lease_blocks_a_successful_validator(self):
+        import tempfile
+        from pathlib import Path
+        from agentforge_django.runner import run_job
+        from agentforge_django.v05_fixture import make_fixture
+
+        with tempfile.TemporaryDirectory(prefix="af-v09-fence-") as folder:
+            root = make_fixture(Path(folder) / "django")
+            self.project.root_path = str(root)
+            self.project.enabled = True
+            self.project.save(update_fields=["root_path", "enabled"])
+            job = AgentJob.objects.create(
+                project=self.project, mode=AgentJob.Mode.VERIFY,
+                status=AgentJob.Status.PENDING,
+            )
+            self.lease.delete()
+            with override_settings(
+                AGENTFORGE_ALLOWED_ROOTS=[str(root)],
+                AGENTFORGE_V09_HEARTBEAT_ENABLED=False,
+            ), patch(
+                "agentforge_django.runner.isolated_verification",
+                return_value={
+                    "backend": "docker-offline", "passed": True,
+                    "business_tests_executed": True,
+                    "checks": [{"success": True, "returncode": 0},
+                               {"success": True, "returncode": 0}],
+                },
+            ), patch("agentforge_django.runner.lease_owned", return_value=False):
+                result = run_job(job.pk)
+            self.assertEqual(result.status, AgentJob.Status.BLOCKED)
+            self.assertEqual(result.result["failure_class"], "WORKER_LEASE_LOST")
+
     def test_lease_token_fences_stale_worker(self):
         self.assertTrue(lease_owned(
             project_id=self.project.pk, job_id=self.job.pk,
