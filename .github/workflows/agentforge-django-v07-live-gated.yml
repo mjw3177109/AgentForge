@@ -1,0 +1,54 @@
+name: AgentForge Django V0.7 gated REAL DeepSeek acceptance
+
+# Deliberately NOT scheduled on every push.
+# To enable on this development branch:
+# 1. repository Actions secret AGENTFORGE_LLM_API_KEY
+# 2. repository variable AGENTFORGE_V07_PAID_LIVE = I_APPROVE_THREE_DEEPSEEK_RUNS
+# 3. change this workflow file in a new commit on feature/django-agent-manager-v1,
+#    or use workflow_dispatch when the workflow exists on default branch.
+# After completion remove the variable to prevent future paid runs.
+on:
+  push:
+    branches:
+      - feature/django-agent-manager-v1
+    paths:
+      - .github/workflows/agentforge-django-v07-live-gated.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agentforge-v07-paid-live
+  cancel-in-progress: false
+
+jobs:
+  real-deepseek-three-round:
+    if: ${{ vars.AGENTFORGE_V07_PAID_LIVE == 'I_APPROVE_THREE_DEEPSEEK_RUNS' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AGENTFORGE_LLM_API_KEY: ${{ secrets.AGENTFORGE_LLM_API_KEY }}
+      AGENTFORGE_LLM_BASE_URL: https://api.deepseek.com
+      AGENTFORGE_LLM_MODEL: deepseek-chat
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install exact Django addon
+        run: python -m pip install -e ".[dev,staging]"
+      - name: Fail closed without explicit API key
+        run: test -n "$AGENTFORGE_LLM_API_KEY"
+      - name: Build independent offline Docker verifier
+        run: docker build -t agentforge-django-verify:0.4 -f docker/Dockerfile.verify .
+      - name: Three REAL DeepSeek coding and repair rounds on synthetic Django only
+        run: python scripts/run_django_v06_live_acceptance.py --confirm-paid-calls --output artifacts/v07-live/summary.json
+      - name: Upload sanitized real-model evidence even on FAIL
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: v07-three-real-deepseek-coding-rounds
+          path: artifacts/v07-live/summary.json
+          retention-days: 7
+          if-no-files-found: warn
