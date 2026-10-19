@@ -52,3 +52,11 @@ jobs:
         run: python scripts/run_django_v06_smoke.py
       - name: V1.1 three DISTINCT Django benchmarks, with scripted agents and real Docker tests
         run: python scripts/run_django_v11_offline.py
+      - name: Archive V1.1 offline 3-case evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agentforge-v11-scripted-agents-real-docker-report
+          path: artifacts/django-v11/offline-report.json
+          retention-days: 14
+          if-no-files-found: warn

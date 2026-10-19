@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """V1.1 three-case offline benchmark with SCRIPTED agents and REAL Docker."""
+import argparse
 import json
 import os
 import sys
@@ -16,12 +17,26 @@ from agentforge_django.v11_runner import run_three_case_suite
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", default="artifacts/django-v11/offline-report.json")
+    args = parser.parse_args()
     # Guard: this entrypoint never fetches model credentials or contacts LLM.
     result = run_three_case_suite(
         lambda case: FakeScenarioAgent(case),
         model_kind="SCRIPTED_FAKE_AGENT",
     )
-    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(
+        json.dumps(result, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    print(json.dumps({
+        "overall": result["overall"],
+        "cases_passed": result["cases_passed"],
+        "model_kind": result["model_kind"],
+        "report": str(output),
+    }, ensure_ascii=False))
     raise SystemExit(0 if result["overall"] == "PASS" else 2)
 
 

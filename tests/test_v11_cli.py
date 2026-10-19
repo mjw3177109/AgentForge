@@ -11,6 +11,7 @@ def test_paid_workflow_is_gated_and_offline_is_separate():
     assert "--confirm-paid-calls" in live
     assert "create_v05_broker(max_requests=5)" in live
     assert "SCRIPTED_FAKE_AGENT" in offline
+    assert "artifacts/django-v11/offline-report.json" in offline
     assert "REAL_DEEPSEEK" in live
     assert "vars.AGENTFORGE_V07_PAID_LIVE" in workflow
     assert "secrets.AGENTFORGE_LLM_API_KEY" in workflow
