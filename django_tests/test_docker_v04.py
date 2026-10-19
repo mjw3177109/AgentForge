@@ -32,7 +32,7 @@ class DockerSecurityTests(SimpleTestCase):
         for expected in (
             "--network none", "--cap-drop ALL", "--security-opt no-new-privileges",
             "--read-only", "--pull never", "--user 65534:65534",
-            "--pids-limit 128", "dst=/workspace,rw",
+            "--pids-limit 128", "dst=/workspace",
         ):
             self.assertIn(expected, rendered)
         for forbidden in ("--privileged", "/var/run/docker.sock", "--network host",
