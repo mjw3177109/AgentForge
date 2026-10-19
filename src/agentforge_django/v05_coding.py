@@ -186,7 +186,7 @@ def run_approved_v05(job, source_root, *, broker=None):
     """Recheck immutable approval at the moment of execution."""
     from django.conf import settings
     from .approvals import approval_digests
-    from .models import AgentJob, MutationApproval
+    from .models import MutationApproval
     from .v05_broker import create_v05_broker
 
     project = job.project
@@ -202,7 +202,7 @@ def run_approved_v05(job, source_root, *, broker=None):
         approval = job.approval
     except MutationApproval.DoesNotExist as exc:
         raise BoundaryDenied("Human approval missing") from exc
-    if not (approval.approved_by.is_staff and approval.approved_by.is_active):
+    if not (approval.approved_by.is_superuser and approval.approved_by.is_staff and approval.approved_by.is_active):
         raise BoundaryDenied("Approval actor is not an active staff member")
     if (approval.request_sha256, approval.configuration_sha256) != approval_digests(job):
         raise BoundaryDenied("Human approval no longer matches this job and its policy")
