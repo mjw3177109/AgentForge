@@ -132,6 +132,7 @@ class QueueAndRecoveryTests(TestCase):
             job.pk, operator_confirmed=True).status, AgentJob.Status.BLOCKED)
         self.assertFalse(JobLease.objects.filter(project=self.project).exists())
         self.assertTrue(verify_chain(job))
+        job.refresh_from_db()
         self.assertEqual(job.result["failure_class"], "INTERRUPTED_OR_ABANDONED_WORKER")
 
     def test_approval_is_bound_to_request_and_policy(self):
@@ -164,6 +165,14 @@ class QueueAndRecoveryTests(TestCase):
         with self.assertRaises(ValueError):
             approval.reason = "tampered"
             approval.save()
+
+    def test_verify_requires_business_test_gate(self):
+        self.project.run_business_tests = False
+        self.project.save(update_fields=["run_business_tests"])
+        job = AgentJob.objects.create(project=self.project, mode=AgentJob.Mode.VERIFY)
+        self.assertEqual(run_job(job.pk).status, AgentJob.Status.BLOCKED)
+        self.assertIn("business tests", job.result.get("reason", "").lower() if
+                      (job.refresh_from_db() or True) else "")
 
     def test_audit_does_not_claim_verified_business(self):
         from agentforge_django.health import project_health
