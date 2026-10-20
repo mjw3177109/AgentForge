@@ -14,6 +14,7 @@ from django.core.management.base import BaseCommand, CommandError
 from agentforge_django.models import AgentJob, JobLease
 from agentforge_django.worker_readiness import worker_readiness
 from agentforge_django.v21_process_guard import terminate_process_group, group_quiescent
+from agentforge_django.v22_subreaper import exclusive_subreaper, drain_adopted_children
 
 
 class Command(BaseCommand):
@@ -45,34 +46,47 @@ class Command(BaseCommand):
         if manage.name != "manage.py" or not manage.is_file():
             raise CommandError("Invoke this command through the trusted Django manage.py")
         command = [sys.executable, str(manage), "run_agentforge_job", str(job.pk)]
-        # No pipe capture: target code logs may contain private data.
-        child = subprocess.Popen(
-            command, shell=False, start_new_session=True,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        # Linux subreaper also adopts reparented descendants that escaped
+        # the original session with setsid(). It must own NO other children.
         try:
-            code = child.wait(timeout=seconds)
-        except subprocess.TimeoutExpired:
-            # A direct child may exit on TERM while its grandchildren keep
-            # running. V2.1 always SIGKILLs the entire original process group
-            # and checks that no executable group members remain.
-            terminated = terminate_process_group(child)
-            if not terminated:
-                raise CommandError(
-                    "WORKER_TIMEOUT_PROCESS_EXIT_UNVERIFIED; manual process, "
-                    "Docker and lease inspection required"
+            with exclusive_subreaper():
+                # No pipe capture: target code logs may contain private data.
+                child = subprocess.Popen(
+                    command, shell=False, start_new_session=True,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
+                timed_out = False
+                try:
+                    code = child.wait(timeout=seconds)
+                except subprocess.TimeoutExpired:
+                    timed_out = True
+                    group_clean = terminate_process_group(child)
+                    code = None
+                else:
+                    group_clean = group_quiescent(child.pid)
+                    if not group_clean:
+                        terminate_process_group(child, term_grace=1.0, kill_grace=5.0)
+                adopted_clear, adopted_seen = drain_adopted_children(seconds=5.0)
+                if not adopted_clear or not group_clean:
+                    raise CommandError(
+                        "WORKER_PROCESS_TREE_EXIT_UNVERIFIED; manual process, "
+                        "Docker and lease inspection required"
+                    )
+                if timed_out:
+                    raise CommandError(
+                        "WORKER_TIMEOUT: process tree quiescent; Docker/lease "
+                        "inspection and explicit recovery still required"
+                    )
+                if adopted_seen or code is None:
+                    raise CommandError(
+                        "WORKER_ESCAPED_DESCENDANT_DETECTED; child was stopped, "
+                        "no successful completion or automatic recovery"
+                    )
+        except (RuntimeError, OSError) as exc:
+            # Never silently downgrade to the old process-group-only mode.
             raise CommandError(
-                "WORKER_TIMEOUT: OS process group quiescent; still inspect "
-                "Docker daemon containers and recover lease manually"
-            )
-        if not group_quiescent(child.pid):
-            # A child returning zero is NOT enough if it leaves descendants.
-            terminate_process_group(child, term_grace=1.0, kill_grace=5.0)
-            raise CommandError(
-                "WORKER_CHILD_DESCENDANTS_REMAIN_OR_UNVERIFIED; no successful "
-                "finalization claim, inspect Docker and lease manually"
-            )
+                "WORKER_LINUX_SUBREAPER_UNAVAILABLE_OR_UNVERIFIED"
+            ) from exc
         job.refresh_from_db()
         if (code == 0 and (
             job.status not in (AgentJob.Status.PASS, AgentJob.Status.PROPOSED)

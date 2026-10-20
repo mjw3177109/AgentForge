@@ -726,3 +726,38 @@ python scripts/run_django_v21_supervisor_smoke.py
 发生超时后仍必须按 `deploy/v19/README.md` 人工核实
 OS、Docker 容器和 lease；不得自动重试、回收执行锁或上线。
 也不代表已部署独立持久 VM，或真实 DeepSeek 3/3 已执行。
+
+
+## V2.2 — Linux 子进程收养、脱离进程组的遗留进程防误判
+
+V2.1 已能终止原始 OS 进程组，但原任务可以启动调用 `setsid`
+的孙进程，主动进入另一进程组。即使最初的子进程返回 0，
+这类子孙进程也可能继续运行。V2.2 增加仅用于专用受信任 Linux
+Worker 的 `PR_SET_CHILD_SUBREAPER`：单任务 supervisor 在启动
+前要求没有其他子任务，并将意外孤儿子进程收养到监督进程名下。
+退出或超时后读取 Linux `/proc/self/task/*/children` 检查已被
+收养的任务后代，通过 `pidfd_open` 加
+`pidfd_send_signal(SIGKILL)` 安全发信号并使用精确 `waitpid` 回收。
+其目的在于避免复用 PID 误伤别的进程。至少持续一个安静窗口确认
+没有活动/僵尸子进程，才能认为已清理。
+
+如果发现逃逸后代，即使最终成功清理，也不接受原任务作为
+正常成功；返回 `WORKER_ESCAPED_DESCENDANT_DETECTED`，候选交付
+继续要求人工检查。无法启用 Linux subreaper、缺少 pidfd 支持、
+无法读取 /proc 或清理超时，都 **fail closed**，不会退回旧的
+仅进程组验证逻辑。
+
+在 Linux CI 上执行两个**真实操作系统进程**场景：一是主进程
+正常退出但留下 setsid 逃逸进程；二是主进程超时且后代主动
+setsid；两者都须被收养检测、杀死并回收，不触及 Docker、
+客户源码、PostgreSQL 或 DeepSeek API。
+
+~~~bash
+python scripts/run_django_v22_setsid_smoke.py
+~~~
+
+边界：没有能力发现刻意逃离操作系统 cgroup/namespace 并由其他
+受信任守护进程创建的子进程；也不能控制 Docker daemon 中独立
+存活的容器。生产仍建议使用 systemd `KillMode=control-group`
+作为第二层保护，并按 V1.9 操作手册人工核对 Docker 残留和 lease。
+**未部署独立常驻 VM、未进行真实 DeepSeek 三案例付费验收。**

@@ -113,7 +113,13 @@ class SupervisedQueueTests(TestCase):
             ), patch(
                 "agentforge_django.management.commands.supervise_agentforge_job.terminate_process_group",
                 return_value=True,
-            ) as terminated:
+            ) as terminated, patch(
+                "agentforge_django.management.commands.supervise_agentforge_job.exclusive_subreaper",
+                return_value=__import__("contextlib").nullcontext(),
+            ), patch(
+                "agentforge_django.management.commands.supervise_agentforge_job.drain_adopted_children",
+                return_value=(True, False),
+            ):
                 with self.assertRaisesRegex(CommandError, "WORKER_TIMEOUT"):
                     Command().handle(
                         job_id=str(job.pk), timeout_seconds=60, mode="ci-staging"

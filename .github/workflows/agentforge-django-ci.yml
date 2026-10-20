@@ -28,6 +28,8 @@ jobs:
       - run: python -m django test django_tests --settings=django_tests.settings -v 2
       - name: V2.1 REAL Linux TERM-to-KILL process tree smoke (no LLM)
         run: python scripts/run_django_v21_supervisor_smoke.py
+      - name: V2.2 REAL Linux setsid escape + subreaper smoke (no LLM)
+        run: python scripts/run_django_v22_setsid_smoke.py
       - name: Read-only real-model readiness inventory (NO API calls)
         run: python scripts/check_agentforge_v10_readiness.py
       - run: python examples/django_host/manage.py process_agentforge_queue --help
