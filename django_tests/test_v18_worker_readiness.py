@@ -134,8 +134,15 @@ class WorkerStartupPreflightTests(SimpleTestCase):
     def test_docker_identity_mismatch_blocks_after_schema_check(self):
         result, _, _, image = self.happy(pin="sha256:" + "b" * 64)
         self.assertFalse(result["ready_to_accept_candidate_only_jobs"])
-        self.assertEqual(result["checks"][-1]["failure_code"],
-                         "DOCKER_PIN_UNAVAILABLE_OR_MISMATCH")
+        status = {item["check"]: item for item in result["checks"]}
+        self.assertEqual(
+            status["docker_verifier_identity"]["failure_code"],
+            "DOCKER_PIN_UNAVAILABLE_OR_MISMATCH",
+        )
+        self.assertEqual(
+            status["orphan_verifier_containers"]["failure_code"],
+            "SKIPPED_INVALID_CONFIG_OR_DOCKER",
+        )
         image.assert_called_once()
 
     def test_no_actual_model_or_production_vm_claim(self):
