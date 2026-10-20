@@ -1,0 +1,10 @@
+# Example ONLY. Maintainer review required before installing in a Django repo.
+# No change is made to an existing project's execution profiles.
+allowed_verification_executables: [python]
+agents:
+  backend:
+    context_paths: [manage.py, pyproject.toml]
+    read_scope: [apps/orders/**, manage.py, pyproject.toml]
+    write_scope: [apps/orders/services.py]
+    deny_scope: [apps/orders/migrations/**]
+    verification: []
