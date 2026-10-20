@@ -84,6 +84,12 @@ def worker_readiness(*, mode="dedicated"):
                 for p in roots)
     )
     record("project_roots", paths_ok, "APPROVED_PROJECT_ROOTS_INVALID")
+    # A dedicated Worker must have a model secret from its private manager;
+    # CI deliberately requires the opposite, preventing accidental paid calls.
+    record("model_secret_gate",
+           bool(os.environ.get("AGENTFORGE_LLM_API_KEY")) if dedicated
+           else not bool(os.environ.get("AGENTFORGE_LLM_API_KEY")),
+           "MODEL_SECRET_REQUIRED_OR_FORBIDDEN")
 
     pin = getattr(settings, "AGENTFORGE_DOCKER_VERIFY_IMAGE_ID", None)
     record("pinned_verifier_config",
