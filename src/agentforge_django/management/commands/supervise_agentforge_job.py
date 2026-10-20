@@ -5,7 +5,6 @@ outlive the CLI and MUST be manually inspected before operator lease recovery.
 """
 import os
 from pathlib import Path
-import signal
 import subprocess
 import sys
 
@@ -14,6 +13,7 @@ from django.core.management.base import BaseCommand, CommandError
 
 from agentforge_django.models import AgentJob, JobLease
 from agentforge_django.worker_readiness import worker_readiness
+from agentforge_django.v21_process_guard import terminate_process_group, group_quiescent
 
 
 class Command(BaseCommand):
@@ -53,28 +53,25 @@ class Command(BaseCommand):
         try:
             code = child.wait(timeout=seconds)
         except subprocess.TimeoutExpired:
-            # Best-effort process tree termination: remote Docker processes
-            # may STILL be alive after CLI disappears.
-            try:
-                os.killpg(child.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                child.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(child.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                try:
-                    child.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    raise CommandError(
-                        "WORKER_TIMEOUT_PROCESS_EXIT_UNVERIFIED; manual inspection required"
-                    )
+            # A direct child may exit on TERM while its grandchildren keep
+            # running. V2.1 always SIGKILLs the entire original process group
+            # and checks that no executable group members remain.
+            terminated = terminate_process_group(child)
+            if not terminated:
+                raise CommandError(
+                    "WORKER_TIMEOUT_PROCESS_EXIT_UNVERIFIED; manual process, "
+                    "Docker and lease inspection required"
+                )
             raise CommandError(
-                "WORKER_TIMEOUT: child terminated; lease remains for manual "
-                "Docker/process inspection and explicit operator recovery"
+                "WORKER_TIMEOUT: OS process group quiescent; still inspect "
+                "Docker daemon containers and recover lease manually"
+            )
+        if not group_quiescent(child.pid):
+            # A child returning zero is NOT enough if it leaves descendants.
+            terminate_process_group(child, term_grace=1.0, kill_grace=5.0)
+            raise CommandError(
+                "WORKER_CHILD_DESCENDANTS_REMAIN_OR_UNVERIFIED; no successful "
+                "finalization claim, inspect Docker and lease manually"
             )
         job.refresh_from_db()
         if (code == 0 and (

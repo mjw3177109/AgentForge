@@ -111,14 +111,15 @@ class SupervisedQueueTests(TestCase):
                 "agentforge_django.management.commands.supervise_agentforge_job.subprocess.Popen",
                 return_value=child,
             ), patch(
-                "agentforge_django.management.commands.supervise_agentforge_job.os.killpg"
-            ) as killed:
+                "agentforge_django.management.commands.supervise_agentforge_job.terminate_process_group",
+                return_value=True,
+            ) as terminated:
                 with self.assertRaisesRegex(CommandError, "WORKER_TIMEOUT"):
                     Command().handle(
                         job_id=str(job.pk), timeout_seconds=60, mode="ci-staging"
                     )
-            killed.assert_called_once()
-            self.assertEqual(child.wait.call_count, 2)
+            terminated.assert_called_once_with(child)
+            self.assertEqual(child.wait.call_count, 1)
         job.refresh_from_db()
         self.assertEqual(job.status, AgentJob.Status.PENDING)
         self.assertFalse(job.leases.exists())
