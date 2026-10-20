@@ -905,3 +905,34 @@ docker image inspect --format '{{.Id}}' agentforge-django-verify:0.4
 **边界：** Docker 镜像 `.Id` 是本地 image config/content ID，
 **不是** registry manifest digest、签名校验、SBOM 或 Docker daemon
 可信性证明。本阶段未部署独立持久 VM，亦未触发真实 DeepSeek 付费请求。
+
+
+## V1.8 — 专用 Worker 启动预检（不调用付费 API）
+
+新增 `python examples/django_host/manage.py check_agentforge_worker --mode dedicated --json`。
+
+预检 **只读** 检查：独立 Worker 角色和显式部署许可、关闭旧版宿主执行功能、
+可信项目根目录、远程 PostgreSQL 的 TLS `verify-full` 配置、
+**实际 PostgreSQL SELECT 1**、AgentForge Django migrations 全部已安装、
+已开启数据库心跳、已审批 Docker 镜像 SHA-256 ID 与本机镜像一致、
+以及 Worker 的 DeepSeek 密钥仅在受信任进程存在。输出
+`ready_to_accept_candidate_only_jobs` 和固定错误码，不打印密钥、模型提示词、
+数据库密码或用户项目源码。
+
+服务模板 `deploy/v07/agentforge-worker.service` 已加 `ExecStartPre`：
+检查失败就阻止 Worker 接单，不执行迁移、不自动拉镜像、不修改 Git。
+可在专用 Linux VM 上使用以下命令验收（需事先配置已批准的环境文件）：
+
+~~~bash
+DJANGO_SETTINGS_MODULE=config.v07_worker_settings \
+python examples/django_host/manage.py check_agentforge_worker --mode dedicated --json
+~~~
+
+GitHub CI 则在**临时同主机环境**使用 `--mode ci-staging`，它只接受
+`CI=true`、隔离的测试 PostgreSQL localhost 和无 DeepSeek Key；
+在真正执行合成任务之前，单独启动 Django Worker 预检进程并验证
+全部检查成功。缺数据库、迁移、镜像身份或权限时会先拒绝接单。
+
+**没有**因通过 CI 而宣称独立持久 VM 已部署、外部 PostgreSQL 已 provision，
+也没有真实 DeepSeek 三案例付费运行。此命令验证的是准备条件，
+不能证明 Docker 守护进程未被入侵或 VM 物理独立，也不自动开启生产发布权限。

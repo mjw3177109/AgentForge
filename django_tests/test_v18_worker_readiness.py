@@ -108,7 +108,7 @@ class WorkerStartupPreflightTests(SimpleTestCase):
         self.assertFalse(report["ready_to_accept_candidate_only_jobs"])
         conn.cursor.assert_not_called()
         image.assert_not_called()
-        self.assertIn("MODE_NOT_AUTHORIZED", [
+        self.assertIn("WORKER_ROLE_OR_PIPELINE_DISABLED", [
             item["failure_code"] for item in report["checks"]
         ])
 
