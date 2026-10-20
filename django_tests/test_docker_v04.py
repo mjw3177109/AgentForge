@@ -66,7 +66,7 @@ class DockerSecurityTests(SimpleTestCase):
         def fake_docker(argv, *, timeout):
             commands.append(argv)
             if argv[:2] == ["image", "inspect"]:
-                return SimpleNamespace(returncode=0, stdout="", stderr="")
+                return SimpleNamespace(returncode=0, stdout="sha256:" + "a" * 64 + "\n", stderr="")
             if argv[0] == "run":
                 test = "test" in argv
                 return SimpleNamespace(
@@ -89,7 +89,7 @@ class DockerSecurityTests(SimpleTestCase):
     def test_docker_zero_test_count_is_never_pass(self):
         def fake_docker(argv, *, timeout):
             if argv[:2] == ["image", "inspect"]:
-                return SimpleNamespace(returncode=0, stdout="", stderr="")
+                return SimpleNamespace(returncode=0, stdout="sha256:" + "a" * 64 + "\n", stderr="")
             if argv[0] == "run":
                 return SimpleNamespace(
                     returncode=0,

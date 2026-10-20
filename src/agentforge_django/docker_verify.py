@@ -18,6 +18,7 @@ from .verification import copy_workspace, summarize_check
 
 
 _IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:-]{0,199}$")
+_IMAGE_ID_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 def workspace_fingerprint(root: Path):
@@ -51,6 +52,40 @@ def docker_image():
     if image.lower() in ("latest", "docker:latest") or image.endswith(":latest"):
         raise BoundaryDenied("Floating latest images are not allowed for verification")
     return image
+
+
+def resolve_verifier_image(image):
+    """Resolve the mutable label ONCE, and run both checks by content image ID.
+
+    For a persistent Worker, the expected sha256 image ID is supplied from
+    operator-controlled settings and must match the actual installed image.
+    Image IDs are Docker configuration/content IDs, NOT an independently
+    verified image signature or registry manifest digest.
+    """
+    expected = getattr(settings, "AGENTFORGE_DOCKER_VERIFY_IMAGE_ID", None)
+    require_pin = getattr(settings, "AGENTFORGE_DOCKER_VERIFY_REQUIRE_PIN", False)
+    if type(require_pin) is not bool:
+        raise BoundaryDenied("Invalid verifier image pin enforcement switch")
+    if expected is not None and (
+        not isinstance(expected, str) or not _IMAGE_ID_PATTERN.fullmatch(expected)
+    ):
+        raise BoundaryDenied("Configured Docker image ID must be sha256 plus 64 lowercase hex")
+    if require_pin and expected is None:
+        raise BoundaryDenied("Production verifier requires an operator-approved image ID")
+    try:
+        available = _run_docker(
+            ["image", "inspect", "--format", "{{.Id}}", image], timeout=15
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise BoundaryDenied("Docker daemon or verifier image preflight unavailable") from exc
+    if available.returncode != 0:
+        raise BoundaryDenied("Verification Docker image not installed locally; no auto-pull")
+    actual = available.stdout.strip()
+    if not _IMAGE_ID_PATTERN.fullmatch(actual):
+        raise BoundaryDenied("Docker image identity missing or malformed")
+    if expected is not None and actual != expected:
+        raise BoundaryDenied("Installed verifier image identity differs from approved pin")
+    return actual
 
 
 def _run_docker(argv, *, timeout):
@@ -98,13 +133,9 @@ def docker_verification(root: Path, *, with_tests=True, timeout=180):
     """Runs a Django project in an offline container; missing Docker/image = BLOCKED."""
     if not shutil.which("docker"):
         raise BoundaryDenied("Docker CLI unavailable; refusing host subprocess fallback")
-    image = docker_image()
-    try:
-        available = _run_docker(["image", "inspect", image], timeout=15)
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise BoundaryDenied("Docker daemon or image preflight unavailable") from exc
-    if available.returncode:
-        raise BoundaryDenied("Verification Docker image not installed locally; no auto-pull")
+    # Resolve the tag once, then execute BOTH phases using the validated
+    # immutable local image ID, preventing tag-swap between check and test.
+    image = resolve_verifier_image(docker_image())
 
     checks = ["check", "test"] if with_tests else ["check"]
     result = []
@@ -157,6 +188,7 @@ def docker_verification(root: Path, *, with_tests=True, timeout=180):
                 break
     return {
         "backend": "docker-offline",
+        "verifier_image_id": image,
         "checks": result,
         "passed": len(result) == len(checks) and all(x["success"] for x in result),
         "business_tests_executed": with_tests and len(result) == 2,

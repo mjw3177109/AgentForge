@@ -580,3 +580,34 @@ python scripts/run_django_v16_write_barrier_smoke.py
 测试本身有逻辑漏洞、模型假造行为等问题仍需要更强独立 VM/
 微虚拟机、可信镜像摘要、审计与人工审批。实际 DeepSeek 付费调用
 及持久 VM 部署仍未执行，本阶段不将测试脚本称为真实模型验收。
+
+
+## V1.7 — 防止 Docker 验证镜像标签被替换
+
+`docker_verification` 现在先使用本地 Docker Engine 查询
+`image inspect --format '{{.Id}}'` 获取 **sha256:64 位**镜像配置 ID，
+验证格式后使用该 ID（而不是可变的 `agentforge-django-verify:0.4`
+标签）执行后续 `check` 和 `test`。两轮任务复用同一个镜像 ID；
+检查到不存在、格式异常、与预先批准 ID 不一致均拒绝运行，不自动
+pull、build 或执行本地宿主测试。
+
+**持久 Worker 配置** `config.v07_worker_settings` 现在
+强制要求 `AGENTFORGE_DOCKER_VERIFY_IMAGE_ID=sha256:...`；
+在专用 VM 上先审核构建来源/镜像内容，再执行：
+
+~~~bash
+docker image inspect --format '{{.Id}}' agentforge-django-verify:0.4
+~~~
+
+将返回的完整镜像 ID 作为 Worker 的受保护环境变量。服务启动后，
+标签被指向另一个镜像时会直接阻断。设置只能由 VM 操作员维护；
+不用客户项目源码或 LLM 输出来设置 pin。
+
+新增 `scripts/run_django_v17_image_identity_smoke.py` 在真实 Docker
+上验证正确 pin 可通过、错误 pin 必须被阻止，并核对返回证据与
+实际镜像 ID 一致。附加离线测试模拟镜像标签变化及无效 Docker
+响应，确认验证脚本不能绕过 ID 检查。
+
+**边界：** Docker 镜像 `.Id` 是本地 image config/content ID，
+**不是** registry manifest digest、签名校验、SBOM 或 Docker daemon
+可信性证明。本阶段未部署独立持久 VM，亦未触发真实 DeepSeek 付费请求。

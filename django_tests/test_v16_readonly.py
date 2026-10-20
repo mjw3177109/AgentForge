@@ -56,7 +56,7 @@ class ReadOnlyDockerBarrierTests(SimpleTestCase):
         runs = []
         def fake_docker(argv, *, timeout):
             if argv[:2] == ["image", "inspect"]:
-                return SimpleNamespace(returncode=0, stdout="", stderr="")
+                return SimpleNamespace(returncode=0, stdout="sha256:" + "a" * 64 + "\n", stderr="")
             if argv[0] == "run":
                 runs.append(argv)
                 mount = argv[argv.index("--mount") + 1]
@@ -83,7 +83,7 @@ class ReadOnlyDockerBarrierTests(SimpleTestCase):
     def test_mocked_benign_two_checks_remain_green(self):
         def fake_docker(argv, *, timeout):
             if argv[:2] == ["image", "inspect"]:
-                return SimpleNamespace(returncode=0, stdout="", stderr="")
+                return SimpleNamespace(returncode=0, stdout="sha256:" + "a" * 64 + "\n", stderr="")
             if argv[0] == "run":
                 test = "test" in argv
                 return SimpleNamespace(
