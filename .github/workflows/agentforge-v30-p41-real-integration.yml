@@ -1,0 +1,205 @@
+name: AgentForge V3 P4.1 Real Integration (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Exact text RUN_THREE_PAID_DEEPSEEK_ROUNDS (paid model execution)'
+        required: true
+        type: string
+      trusted_verifier_sha:
+        description: 'Reviewed 40-char SHA with V3 P4.1 verification files'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v30-p41-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explicit approval for paid model runs, isolated branch only
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          TRUSTED_SHA: ${{ inputs.trusted_verifier_sha }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = 'RUN_THREE_PAID_DEEPSEEK_ROUNDS'
+          [[ "$GITHUB_REF_NAME" == feature/v3-* || "$GITHUB_REF_NAME" == experiment/v3-* ]]
+          [[ "$TRUSTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+
+  offline:
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Three full regression/protocol cycles (no skips counted as PASS)
+        run: |
+          mkdir -p artifacts/v30-p41-offline
+          python scripts/v3_p4_acceptance.py offline --repo-root . --scope full \
+            --iterations 3 --output 'artifacts/v30-p41-offline/python-${{ matrix.python-version }}.json'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p41-python-${{ matrix.python-version }}
+          path: artifacts/v30-p41-offline/
+          if-no-files-found: error
+          retention-days: 7
+
+  scope-audit:
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - name: Require exact V2 reviewed baseline, unchanged trusted policy, P2 integrated
+        run: python scripts/v3_p41_audit.py --repo-root .
+
+  live:
+    needs: [offline, scope-audit]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: agentforge
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd='mysqladmin ping -h localhost -proot'
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd='redis-cli ping'
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      AGENTFORGE_LLM_BASE_URL: ${{ vars.AGENTFORGE_LLM_BASE_URL }}
+      AGENTFORGE_LLM_MODEL: ${{ vars.AGENTFORGE_LLM_MODEL }}
+      AGENTFORGE_LLM_API_KEY: ${{ secrets.AGENTFORGE_LLM_API_KEY }}
+      AGENTFORGE_LLM_TIMEOUT: '90'
+      AGENTFORGE_LLM_MAX_ATTEMPTS: '3'
+      AGENTFORGE_V20_MYSQL_PASSWORD: root
+      MYSQL_PWD: root
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install independent verification service clients
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-mysql-client redis-tools
+      - run: python -m pip install -e '.[dev]'
+      - name: Require real credentials and isolated service containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AGENTFORGE_LLM_BASE_URL"
+          test -n "$AGENTFORGE_LLM_MODEL"
+          test -n "$AGENTFORGE_LLM_API_KEY"
+          mysql --protocol=TCP -h127.0.0.1 -P3306 -uroot agentforge -e 'SELECT 1;'
+          redis-cli -h 127.0.0.1 -p 6379 PING
+      - name: Three REAL DeepSeek V3 P2 opt-in rounds + 10 immutable behavior gates each
+        run: |
+          python scripts/v3_p41_live_acceptance.py --rounds 3 --round-timeout 1200 \
+            --output-dir artifacts/v30-p41-canary
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p41-real-deepseek-evidence
+          path: artifacts/v30-p41-canary/
+          if-no-files-found: error
+          retention-days: 7
+
+  independent-attestation:
+    needs: [offline, scope-audit, live]
+    if: ${{ always() && needs.offline.result == 'success' && needs.scope-audit.result == 'success' && (needs.live.result == 'success' || needs.live.result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AGENTFORGE_V3_EVIDENCE_KEY: ${{ secrets.AGENTFORGE_V3_EVIDENCE_KEY }}
+      RUN_MODEL: ${{ vars.AGENTFORGE_LLM_MODEL }}
+      PINNED_LIVE_COMMIT: ${{ github.sha }}
+      PINNED_RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Checkout reviewed evidence verifier, NOT generated code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.trusted_verifier_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - uses: actions/download-artifact@v4
+        with:
+          name: p41-real-deepseek-evidence
+          path: artifacts/v30-p41-canary
+      - name: Require independent signing secret
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${#AGENTFORGE_V3_EVIDENCE_KEY}" -ge 32
+          test -n "$RUN_MODEL"
+          test -f artifacts/v30-p41-canary/summary.json
+      - name: Collect and sign all live artifacts in verifier-only runner
+        run: |
+          python scripts/v3_evidence.py collect \
+            --artifacts artifacts/v30-p41-canary \
+            --profile benchmarks/v18_hardened/execution-profiles.yaml \
+            --run-id "$PINNED_RUN_ID" --commit "$PINNED_LIVE_COMMIT" \
+            --model-id "$RUN_MODEL" --key-id p41-trusted-verifier \
+            --output artifacts/p41-signed-canary.json
+      - name: P1 verify HMAC and every digest, then P4.1 verify P2 really opted in
+        run: |
+          python scripts/v3_p41_verify.py \
+            --artifacts artifacts/v30-p41-canary \
+            --profile benchmarks/v18_hardened/execution-profiles.yaml \
+            --manifest artifacts/p41-signed-canary.json \
+            --run-id "$PINNED_RUN_ID" --commit "$PINNED_LIVE_COMMIT" \
+            --model "$RUN_MODEL" --key-id p41-trusted-verifier
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: p41-independent-attestation
+          path: artifacts/p41-signed-canary.json
+          if-no-files-found: warn
+          retention-days: 7

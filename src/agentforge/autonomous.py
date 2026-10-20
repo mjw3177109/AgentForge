@@ -12,6 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 from agentforge.coding import CodingResult, LiveCodingRuntime, VerificationSpec
+from agentforge.repair_v3 import SafeRepairRuntime
 from agentforge.contracts import ArchitectureDraft, RequirementDraft, TaskBundle, TaskDraft
 from agentforge.evidence import EvidenceIndex
 from agentforge.errors import EvidenceError, PolicyDenied
@@ -236,6 +237,7 @@ class AutonomousDevelopmentPipeline:
         allowed_verification_executables: set[str],
         max_coding_attempts: int = 2,
         max_review_rounds: int = 2,
+        enable_v3_safe_repair: bool = False,
     ):
         self.client = client
         self.repo_root = repo_root.resolve()
@@ -243,6 +245,7 @@ class AutonomousDevelopmentPipeline:
         self.allowed_verification_executables = set(allowed_verification_executables)
         self.max_coding_attempts = max_coding_attempts
         self.max_review_rounds = max_review_rounds
+        self.enable_v3_safe_repair = enable_v3_safe_repair
 
     def _project_context(self) -> str:
         path = self.repo_root / ".agent/project.yaml"
@@ -513,7 +516,7 @@ class AutonomousDevelopmentPipeline:
         task_runs: list[TaskRunRecord] = []
         for task in ordered_tasks:
             profile = self.profiles[task.assigned_agent]
-            runtime = LiveCodingRuntime(
+            runtime = (SafeRepairRuntime if self.enable_v3_safe_repair else LiveCodingRuntime)(
                 self.client,
                 self.repo_root,
                 self.allowed_verification_executables,
@@ -602,7 +605,7 @@ class AutonomousDevelopmentPipeline:
                     continue
                 repair_attempt = repair_counts[task.id] + 1
                 profile = self.profiles[task.assigned_agent]
-                runtime = LiveCodingRuntime(
+                runtime = (SafeRepairRuntime if self.enable_v3_safe_repair else LiveCodingRuntime)(
                     self.client,
                     self.repo_root,
                     self.allowed_verification_executables,

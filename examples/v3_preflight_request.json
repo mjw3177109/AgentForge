@@ -1,0 +1,6 @@
+{
+  "task_id": "TASK-900001",
+  "proposed_paths": [
+    "server/src/main/java/com/agentforge/shop/points/PointsService.java"
+  ]
+}

@@ -46,6 +46,8 @@ def main() -> None:
     live.add_argument("--remote", default="origin")
     live.add_argument("--push", action="store_true")
     live.add_argument("--create-pr", action="store_true")
+    live.add_argument("--v3-safe-repair", action="store_true",
+                      help="Enable opt-in P2 rollback and independent compile gates")
     live.add_argument("--github-repo", default=os.getenv("GITHUB_REPOSITORY", ""))
 
     args = parser.parse_args()
@@ -82,6 +84,7 @@ def main() -> None:
             repo_root=root,
             profiles=loaded.profiles,
             allowed_verification_executables=loaded.allowed_executables,
+            enable_v3_safe_repair=args.v3_safe_repair,
         ).run(
             args.request,
             base_branch=args.base,

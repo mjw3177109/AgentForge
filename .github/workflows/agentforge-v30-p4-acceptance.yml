@@ -1,0 +1,190 @@
+name: AgentForge V3 P4 Acceptance (Manual, Isolated)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type RUN_THREE_PAID_DEEPSEEK_ROUNDS; three paid live-model rounds will run'
+        required: true
+        type: string
+      trusted_verifier_sha:
+        description: '40-char reviewed SHA containing P1 evidence verifier, NOT Agent-generated code'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v30-p4-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Explicit run authorization
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate manual opt-in and branch
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          TRUSTED_SHA: ${{ inputs.trusted_verifier_sha }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = RUN_THREE_PAID_DEEPSEEK_ROUNDS
+          [[ "$GITHUB_REF_NAME" == feature/v3-* || "$GITHUB_REF_NAME" == experiment/v3-* ]]
+          [[ "$TRUSTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+
+  offline:
+    name: Full suite Python ${{ matrix.python-version }} (3 independent passes)
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - run: python -m pip install -e '.[dev]'
+      - name: Three independent FULL tests and protocol validations
+        run: |
+          mkdir -p artifacts/offline
+          python scripts/v3_p4_acceptance.py offline --repo-root . --scope full \
+            --iterations 3 --output 'artifacts/offline/python-${{ matrix.python-version }}.json'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v30-offline-python-${{ matrix.python-version }}
+          path: artifacts/offline
+          if-no-files-found: error
+          retention-days: 7
+
+  live:
+    name: Three real DeepSeek rounds with immutable Node/Maven/Vite/MySQL gates
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: agentforge
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h localhost -proot"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      AGENTFORGE_LLM_BASE_URL: ${{ vars.AGENTFORGE_LLM_BASE_URL }}
+      AGENTFORGE_LLM_MODEL: ${{ vars.AGENTFORGE_LLM_MODEL }}
+      AGENTFORGE_LLM_API_KEY: ${{ secrets.AGENTFORGE_LLM_API_KEY }}
+      AGENTFORGE_LLM_TIMEOUT: '90'
+      AGENTFORGE_LLM_MAX_ATTEMPTS: '3'
+      AGENTFORGE_V20_MYSQL_PASSWORD: root
+      MYSQL_PWD: root
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install isolated service clients
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y default-mysql-client redis-tools
+      - run: python -m pip install -e '.[dev]'
+      - name: Strict credential/service prerequisites
+        run: |
+          set -euo pipefail
+          test -n "$AGENTFORGE_LLM_BASE_URL"
+          test -n "$AGENTFORGE_LLM_MODEL"
+          test -n "$AGENTFORGE_LLM_API_KEY"
+          mysql --protocol=TCP -h127.0.0.1 -P3306 -uroot agentforge -e 'SELECT 1;'
+          redis-cli -h 127.0.0.1 -p 6379 PING
+      - name: Three FULL live-model rounds (V2 benchmark, NOT V3 P2 live opt-in)
+        run: |
+          python scripts/run_v20_stability.py --rounds 3 --round-timeout 1200 \
+            --output-dir artifacts/v20-stability
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v30-p4-v20-live-evidence
+          path: artifacts/v20-stability/
+          if-no-files-found: error
+          retention-days: 7
+
+  independent-attestation:
+    name: Independent evidence signing and revalidation
+    needs: [offline, live]
+    if: ${{ always() && needs.offline.result == 'success' && (needs.live.result == 'success' || needs.live.result == 'failure') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      AGENTFORGE_V3_EVIDENCE_KEY: ${{ secrets.AGENTFORGE_V3_EVIDENCE_KEY }}
+      RUN_MODEL: ${{ vars.AGENTFORGE_LLM_MODEL }}
+      PINNED_LIVE_COMMIT: ${{ github.sha }}
+      PINNED_RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Checkout independently reviewed verifier, not live-generated snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.trusted_verifier_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -e '.[dev]'
+      - uses: actions/download-artifact@v4
+        with:
+          name: v30-p4-v20-live-evidence
+          path: artifacts/v20-stability
+      - name: Refuse missing signature prerequisites
+        run: |
+          set -euo pipefail
+          test "${#AGENTFORGE_V3_EVIDENCE_KEY}" -ge 32
+          test -n "$RUN_MODEL"
+          test -f artifacts/v20-stability/summary.json
+      - name: Collect signed evidence in independent runner
+        run: |
+          python scripts/v3_evidence.py collect \
+            --artifacts artifacts/v20-stability \
+            --profile benchmarks/v18_hardened/execution-profiles.yaml \
+            --run-id "$PINNED_RUN_ID" --commit "$PINNED_LIVE_COMMIT" \
+            --model-id "$RUN_MODEL" --key-id p4-reviewed-verifier \
+            --output artifacts/p4-signed-v20.json
+      - name: Independently re-check every digest and three rounds
+        run: |
+          python scripts/v3_p4_acceptance.py verify \
+            --artifacts artifacts/v20-stability \
+            --profile benchmarks/v18_hardened/execution-profiles.yaml \
+            --manifest artifacts/p4-signed-v20.json \
+            --expected-run-id "$PINNED_RUN_ID" --expected-commit "$PINNED_LIVE_COMMIT" \
+            --expected-model "$RUN_MODEL" --expected-key-id p4-reviewed-verifier
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v30-p4-signed-acceptance
+          path: artifacts/p4-signed-v20.json
+          if-no-files-found: warn
+          retention-days: 7
