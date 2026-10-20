@@ -1,0 +1,9 @@
+# Sample only; narrowed production write paths, no Agent-owned test edits.
+allowed_verification_executables: [mvn]
+agents:
+  backend:
+    context_paths: [server/pom.xml]
+    read_scope: [server/**]
+    write_scope: [server/src/main/**]
+    deny_scope: [server/src/test/**]
+    verification: []

@@ -1,0 +1,11 @@
+{
+  "schema": "agentforge.control.v4/1",
+  "project": "example/django-project",
+  "commit": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "run_id": "RUN-django-0001",
+  "task_id": "TASK-000001",
+  "agent": "backend",
+  "action": "PROPOSE_EDIT",
+  "paths": ["apps/orders/services.py"],
+  "budget": {"max_attempts": 2, "max_cost_usd": 5, "max_runtime_seconds": 900}
+}
