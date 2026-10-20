@@ -30,6 +30,8 @@ class DockerImageIdentityTests(SimpleTestCase):
     def fake_docker(self, argv, *, timeout):
         if argv[:2] == ["image", "inspect"]:
             return SimpleNamespace(returncode=0, stdout=IMAGE_A + "\n", stderr="")
+        if argv[0] == "ps":
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
         return SimpleNamespace(
             returncode=0,
             stdout="Ran 1 test in 0.001s\nOK\n" if argv[0] == "run" and "test" in argv else "OK",

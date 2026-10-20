@@ -20,6 +20,39 @@ from .verification import copy_workspace, summarize_check
 _IMAGE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:-]{0,199}$")
 _IMAGE_ID_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 
+_VERIFIER_LABEL = "org.agentforge.verifier=django-offline"
+_VERIFIER_NAME = re.compile(r"^agentforge-verify-[a-f0-9]{20}$")
+_DOCKER_CONTAINER_ID = re.compile(r"^[a-f0-9]{12,64}$")
+
+
+def list_verifier_containers():
+    """Read-only inventory. A failed Docker query is UNKNOWN, never EMPTY."""
+    try:
+        response = _run_docker([
+            "ps", "-a", "--no-trunc",
+            "--filter", "label=" + _VERIFIER_LABEL,
+            "--format", "{{.ID}} {{.Names}}",
+        ], timeout=15)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise BoundaryDenied("Docker verifier container inventory unavailable") from exc
+    if response.returncode != 0:
+        raise BoundaryDenied("Docker verifier container inventory failed")
+    lines = response.stdout.splitlines()
+    if len(lines) > 100:
+        raise BoundaryDenied("Verifier container inventory exceeds limit")
+    found = []
+    for line in lines:
+        values = line.split()
+        if (len(values) != 2
+                or not _DOCKER_CONTAINER_ID.fullmatch(values[0])
+                or not _VERIFIER_NAME.fullmatch(values[1])):
+            raise BoundaryDenied("Unexpected verifier-labelled container identity")
+        found.append({"container_id": values[0], "name": values[1]})
+    return found
+
+
+
+
 
 def workspace_fingerprint(root: Path):
     """Snapshot *all* copied paths and contents, not just the Django tests.
@@ -107,6 +140,7 @@ def build_docker_command(*, image, source, name, check, memory="768m", cpus="1.0
         raise BoundaryDenied("Unsafe Docker container name")
     command = [
         "run", "--rm", "--name", name, "--pull", "never",
+        "--label", _VERIFIER_LABEL,
         "--network", "none",
         "--read-only",
         "--cap-drop", "ALL",
