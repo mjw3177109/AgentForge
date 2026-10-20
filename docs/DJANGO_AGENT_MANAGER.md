@@ -936,3 +936,34 @@ GitHub CI 则在**临时同主机环境**使用 `--mode ci-staging`，它只接�
 **没有**因通过 CI 而宣称独立持久 VM 已部署、外部 PostgreSQL 已 provision，
 也没有真实 DeepSeek 三案例付费运行。此命令验证的是准备条件，
 不能证明 Docker 守护进程未被入侵或 VM 物理独立，也不自动开启生产发布权限。
+
+
+## V1.9 — Docker 残留容器与超时恢复门禁
+
+所有 Django 验证容器带 `org.agentforge.verifier=django-offline` 标签。
+每次 check/test 后不仅执行 `docker rm -f`，还通过独立 Docker
+`ps -a` 检查**精确容器名**确实消失。如果 Docker 清理无法验证，
+当前测试以 `DOCKER_CLEANUP_UNVERIFIED` 失败，即便业务测试返回 0
+也不交付候选补丁。
+
+Worker 启动预检从 **11 项增加到 12 项**：检查 Docker 内所有带此
+标签的容器，包含已停止者；如果存在遗留容器或查询失败，则
+`VERIFIER_CONTAINERS_PRESENT_OR_UNKNOWN`，拒绝接单，不自动删除。
+
+只读运维命令：
+~~~bash
+python examples/django_host/manage.py inspect_agentforge_containers --json --fail-if-any
+python examples/django_host/manage.py inspect_agentforge_leases --json
+python examples/django_host/manage.py check_agentforge_worker --mode dedicated --json
+~~~
+
+systemd 服务增加 `KillMode=control-group` 与 `TimeoutStopSec=30`，
+禁自动重启。但独立 Docker 守护进程中的容器可能继续运行，因此
+恢复前仍必须人工确认旧 Worker 已完全停止、Docker 残留已被安全处置，
+再执行 `recover_agentforge_job --confirm-worker-stopped`。
+详见 `deploy/v19/README.md`。
+
+新增真实 Docker CI 创建一个未运行的标记容器，验证只读扫描能查到，
+随后手动清理并确认扫描归零。没有运行真实 DeepSeek，
+也没有部署专用远程持久 VM；Docker daemon 不可信时这些检查
+不能作为独立安全证明。

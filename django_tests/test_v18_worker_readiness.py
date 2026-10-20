@@ -52,7 +52,7 @@ class WorkerStartupPreflightTests(SimpleTestCase):
         }
 
     def happy(self, *, db_success=True, migrations_pending=False,
-              pin=IMAGE_ID, settings_obj=None):
+              pin=IMAGE_ID, settings_obj=None, orphans=None):
         settings_obj = settings_obj or test_settings(self.root)
         connection = MagicMock()
         connection.vendor = "postgresql"
@@ -78,7 +78,10 @@ class WorkerStartupPreflightTests(SimpleTestCase):
             "agentforge_django.worker_readiness.docker_image",
             return_value="agentforge-django-verify:0.4"
         ), patch("agentforge_django.worker_readiness.resolve_verifier_image",
-                 return_value=pin) as image:
+                 return_value=pin) as image, patch(
+            "agentforge_django.worker_readiness.list_verifier_containers",
+            return_value=[] if orphans is None else orphans,
+        ):
             result = worker_readiness(mode="ci-staging")
         return result, connection, executor, image
 
@@ -86,7 +89,7 @@ class WorkerStartupPreflightTests(SimpleTestCase):
         result, connection, executor, image = self.happy()
         self.assertTrue(result["ready_to_accept_candidate_only_jobs"])
         self.assertEqual(result["checks_passed"], result["checks_total"])
-        self.assertEqual(result["checks_total"], 11)
+        self.assertEqual(result["checks_total"], 12)
         self.assertFalse(result["external_vm_independently_attested"])
         self.assertFalse(result["real_deepseek_tested"])
         self.assertFalse(result["production_release_authorized"])
@@ -140,6 +143,19 @@ class WorkerStartupPreflightTests(SimpleTestCase):
         self.assertNotIn("model_cost", result)
         self.assertNotIn("API_KEY", json.dumps(result))
         self.assertFalse(result["external_vm_independently_attested"])
+
+    def test_orphan_verifier_container_refuses_new_worker_jobs(self):
+        orphans = [{"container_id": "a" * 64,
+                    "name": "agentforge-verify-" + "1" * 20}]
+        result, connection, executor, image = self.happy(orphans=orphans)
+        self.assertFalse(result["ready_to_accept_candidate_only_jobs"])
+        self.assertEqual(result["checks"][-1]["check"],
+                         "orphan_verifier_containers")
+        self.assertEqual(result["checks"][-1]["failure_code"],
+                         "VERIFIER_CONTAINERS_PRESENT_OR_UNKNOWN")
+        connection.cursor.assert_called_once()
+        executor.migration_plan.assert_called_once()
+        image.assert_called_once()
 
     def test_management_command_is_fail_closed(self):
         with patch(

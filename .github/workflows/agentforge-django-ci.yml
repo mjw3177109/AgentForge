@@ -50,6 +50,8 @@ jobs:
         run: python scripts/run_django_v16_write_barrier_smoke.py
       - name: V1.7 real Docker pinned-image acceptance and tag-swap protection
         run: python scripts/run_django_v17_image_identity_smoke.py
+      - name: V1.9 REAL Docker orphan inventory and cleanup visibility
+        run: python scripts/run_django_v19_orphan_smoke.py
       - name: V0.5 simulated agents with ACTUAL Docker business repair acceptance
         run: python scripts/run_django_v05_smoke.py
       - name: V0.6 bounded repair (3 simulated-agent runs, 2 real Docker verifications each)

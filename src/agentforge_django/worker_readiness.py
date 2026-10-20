@@ -12,7 +12,7 @@ from django.conf import settings
 from django.db import connection
 from django.db.migrations.executor import MigrationExecutor
 
-from .docker_verify import docker_image, resolve_verifier_image
+from .docker_verify import docker_image, resolve_verifier_image, list_verifier_containers
 from .guard import BoundaryDenied
 
 
@@ -134,9 +134,20 @@ def worker_readiness(*, mode="dedicated"):
         record("docker_verifier_identity", resolved, "DOCKER_PIN_UNAVAILABLE_OR_MISMATCH")
     else:
         record("docker_verifier_identity", False, "SKIPPED_INVALID_CONFIG_OR_SCHEMA")
+    if all(item["passed"] for item in checks):
+        try:
+            orphans = list_verifier_containers()
+            no_orphans = len(orphans) == 0
+        except (BoundaryDenied, OSError, ValueError):
+            no_orphans = False
+        record("orphan_verifier_containers", no_orphans,
+               "VERIFIER_CONTAINERS_PRESENT_OR_UNKNOWN")
+    else:
+        record("orphan_verifier_containers", False,
+               "SKIPPED_INVALID_CONFIG_OR_DOCKER")
     passed = all(item["passed"] for item in checks)
     return {
-        "schema": "agentforge.django.v18.worker-preflight.v1",
+        "schema": "agentforge.django.v19.worker-preflight.v1",
         "mode": mode,
         "ready_to_accept_candidate_only_jobs": passed,
         "checks": checks,

@@ -173,11 +173,26 @@ def docker_verification(root: Path, *, with_tests=True, timeout=180):
                 item = {"argv": ["python", "manage.py", check],
                         "success": False, "reason": "DOCKER_LAUNCH_ERROR"}
             finally:
-                # Kill or remove an orphan if the client timed out/crashed.
+                # Docker --rm may already have removed the container. 'rm -f'
+                # can return nonzero in that legitimate case; therefore
+                # independently verify ABSENCE using a bounded, read-only
+                # exact-name query. An unverifiable cleanup must never PASS.
+                cleanup_ok = False
                 try:
                     _run_docker(["rm", "-f", name], timeout=15)
+                    remaining = _run_docker([
+                        "ps", "-a", "--filter", f"name=^/{name}$",
+                        "--format", "{{.Names}}",
+                    ], timeout=15)
+                    cleanup_ok = (
+                        remaining.returncode == 0
+                        and remaining.stdout.strip() == ""
+                    )
                 except (OSError, subprocess.TimeoutExpired):
-                    pass
+                    cleanup_ok = False
+            if not cleanup_ok:
+                item["success"] = False
+                item["reason"] = "DOCKER_CLEANUP_UNVERIFIED"
             # Never trust a PASS if code executed by 'check' or 'test'
             # modified/created/deleted any file in the verifier source tree.
             if workspace_fingerprint(sandbox) != original_fingerprint:

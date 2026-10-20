@@ -20,6 +20,10 @@ PrivateDevices=true
 ProtectSystem=full
 ProtectHome=true
 TimeoutStartSec=900
+TimeoutStopSec=30
+KillMode=control-group
+SendSIGKILL=yes
+Restart=no
 UMask=0077
 
 # WARNING: The Docker daemon user/group provides host-level privilege on
