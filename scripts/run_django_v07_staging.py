@@ -54,6 +54,18 @@ def main():
         workspaces.mkdir()
         control = spawn_env("control", workspaces)
         worker = spawn_env("worker", workspaces)
+        # Approve exactly the Docker image built on this ephemeral CI runner;
+        # a missing/bad identity blocks the worker BEFORE any task is claimed.
+        image_check = subprocess.run(
+            ["docker", "image", "inspect", "--format", "{{.Id}}",
+             "agentforge-django-verify:0.4"],
+            cwd=ROOT, check=True, capture_output=True, text=True, timeout=15,
+        )
+        image_id = image_check.stdout.strip()
+        import re
+        if not re.fullmatch(r"sha256:[0-9a-f]{64}", image_id):
+            raise RuntimeError("Docker verifier returned an invalid image ID")
+        worker["AGENTFORGE_DOCKER_VERIFY_IMAGE_ID"] = image_id
         os.environ.update(control)
         from agentforge_django.v05_fixture import REQUEST, make_fixture
         project_root = make_fixture(workspaces / "demo")
@@ -132,6 +144,24 @@ def main():
             if not endpoint_ready:
                 raise RuntimeError("Control plane HTTP endpoint failed")
 
+            # Same settings + database + Docker daemon as the actual Worker,
+            # in a NEW process. No customer source, no API, no schema writes.
+            preflight_process = subprocess.run(
+                [sys.executable, str(HOST / "manage.py"),
+                 "check_agentforge_worker", "--mode", "ci-staging", "--json"],
+                cwd=ROOT, env=worker, capture_output=True, text=True, timeout=35,
+            )
+            if preflight_process.returncode:
+                raise RuntimeError(
+                    "Worker preflight rejected staging: " +
+                    preflight_process.stdout[-1500:]
+                )
+            preflight = json.loads(
+                preflight_process.stdout.strip().splitlines()[-1]
+            )
+            if not preflight.get("ready_to_accept_candidate_only_jobs"):
+                raise RuntimeError("Worker readiness report refused execution")
+
             # Real OS subprocess: separate Django init, permissions and DB connection.
             executed = subprocess.run(
                 [sys.executable, str(ROOT / "scripts" /
@@ -192,6 +222,12 @@ def main():
             "approval_commit_pinned": approval.base_commit == original_sha,
             "audit_hash_chain_valid": verify_chain(job),
             "worker": worker_evidence,
+            "v18_preflight": preflight,
+            "preflight_gate_passed": (
+                preflight.get("ready_to_accept_candidate_only_jobs") is True
+                and preflight.get("checks_passed") ==
+                    preflight.get("checks_total")
+            ),
             "docker_final_pass": _accepted(independent),
             "source_repo_unchanged": project_file_unchanged,
             "candidate_download_integrity_ok": export_ok,
@@ -208,6 +244,7 @@ def main():
             and evidence["docker_final_pass"]
             and project_file_unchanged
             and evidence["audit_hash_chain_valid"]
+            and evidence["preflight_gate_passed"]
             and export_ok and apply_check_ok
             and evidence["heartbeat_beats_observed"]
         ):
