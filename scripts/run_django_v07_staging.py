@@ -184,6 +184,41 @@ def main():
                 server.wait(timeout=5)
 
         job.refresh_from_db()
+        # V2.0 supervised path: a synthetic AUDIT task is executed by a
+        # separate manage.py child via the real process-group supervisor.
+        supervised_audit = AgentJob.objects.create(
+            project=project, mode=AgentJob.Mode.AUDIT,
+            status=AgentJob.Status.PENDING,
+            request="Synthetic audit under V2.0 bounded supervisor",
+        )
+        supervised_child = subprocess.run(
+            [sys.executable, str(HOST / "manage.py"),
+             "process_agentforge_supervised_queue",
+             "--mode", "ci-staging", "--timeout-seconds", "120", "--json"],
+            cwd=ROOT, env=worker, capture_output=True, text=True, timeout=150,
+        )
+        supervised_audit.refresh_from_db()
+        supervised_evidence = {
+            "supervisor_command_exited_zero": supervised_child.returncode == 0,
+            "audit_passed": supervised_audit.status == AgentJob.Status.PASS,
+            "audit_chain_valid": verify_chain(supervised_audit),
+            "supervisor_selected_exact_job": False,
+            "no_orphan_lease": not supervised_audit.leases.exists(),
+            "no_paid_model_requests": True,
+        }
+        if supervised_child.returncode == 0:
+            try:
+                structured = json.loads(
+                    supervised_child.stdout.strip().splitlines()[-1]
+                )
+                supervised_evidence["supervisor_selected_exact_job"] = (
+                    structured.get("selected_job_id") == str(supervised_audit.pk)
+                    and structured.get("supervised") is True
+                )
+            except (ValueError, IndexError, AttributeError):
+                pass
+        if not all(supervised_evidence.values()):
+            raise RuntimeError("V2.0 supervised child integration failed")
         project_file_unchanged = (
             "return a - b" in (project_root / "app/views.py").read_text("utf-8")
             and git(project_root, "status", "--porcelain") == ""
@@ -222,6 +257,7 @@ def main():
             "approval_commit_pinned": approval.base_commit == original_sha,
             "audit_hash_chain_valid": verify_chain(job),
             "worker": worker_evidence,
+            "v20_supervised_audit": supervised_evidence,
             "v18_preflight": preflight,
             "preflight_gate_passed": (
                 preflight.get("ready_to_accept_candidate_only_jobs") is True
@@ -245,6 +281,7 @@ def main():
             and project_file_unchanged
             and evidence["audit_hash_chain_valid"]
             and evidence["preflight_gate_passed"]
+            and all(supervised_evidence.values())
             and export_ok and apply_check_ok
             and evidence["heartbeat_beats_observed"]
         ):

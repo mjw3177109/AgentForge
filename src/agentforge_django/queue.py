@@ -1,10 +1,17 @@
 """Database-backed bounded dispatcher, designed for an operator-controlled worker."""
 
+from django.conf import settings
+
 from .models import AgentJob
 from .runner import run_job
 
 
 def process_pending(*, max_jobs=1, include_verify=False, include_autonomous=False, project_id=None):
+    # Dedicated autonomous/verification must use a bounded OS supervisor.
+    if (getattr(settings, "AGENTFORGE_V06_DEDICATED_WORKER", False)
+            and getattr(settings, "AGENTFORGE_V09_HEARTBEAT_ENABLED", False)
+            and (include_verify or include_autonomous)):
+        raise ValueError("Dedicated Worker must use process_agentforge_supervised_queue")
     if not isinstance(max_jobs, int) or not 1 <= max_jobs <= 100:
         raise ValueError("max_jobs must be between 1 and 100")
     modes = [AgentJob.Mode.AUDIT]

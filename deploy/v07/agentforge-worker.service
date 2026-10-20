@@ -14,12 +14,12 @@ EnvironmentFile=/etc/agentforge/v07-worker.env
 # Reject task intake before the worker touches any user project.
 # This is a READ-ONLY preflight; no migrations, image pull or paid API calls.
 ExecStartPre=/opt/agentforge/venv/bin/python /opt/agentforge/AgentForge/examples/django_host/manage.py check_agentforge_worker --mode dedicated --json
-ExecStart=/opt/agentforge/venv/bin/python /opt/agentforge/AgentForge/examples/django_host/manage.py process_agentforge_queue --max-jobs 1 --include-autonomous
+ExecStart=/opt/agentforge/venv/bin/python /opt/agentforge/AgentForge/examples/django_host/manage.py process_agentforge_supervised_queue --mode dedicated --timeout-seconds 780 --include-autonomous
 NoNewPrivileges=true
 PrivateDevices=true
 ProtectSystem=full
 ProtectHome=true
-TimeoutStartSec=900
+TimeoutStartSec=960
 TimeoutStopSec=30
 KillMode=control-group
 SendSIGKILL=yes

@@ -673,3 +673,28 @@ systemd 服务增加 `KillMode=control-group` 与 `TimeoutStopSec=30`，
 随后手动清理并确认扫描归零。没有运行真实 DeepSeek，
 也没有部署专用远程持久 VM；Docker daemon 不可信时这些检查
 不能作为独立安全证明。
+
+
+## V2.0 — 专用 Worker 正式接入独立子进程监督
+
+先前有 `supervise_agentforge_job`，但 systemd 仍使用直接执行
+Agent 的队列命令，没有把超时监督接入真实生产路径。现在改为：
+
+`ExecStartPre check_agentforge_worker`（12 项安全预检） →
+`process_agentforge_supervised_queue`（最多选取 1 个任务） →
+`supervise_agentforge_job`（新的 OS 进程组） →
+`run_agentforge_job`（只生成候选补丁）。
+
+Worker 子任务默认超时 **780 秒**，systemd 服务总启动超时
+**960 秒**。命令本身和子进程监督器都要重新通过启动预检；
+旧的 `process_agentforge_queue` 在专用 Worker 设置下不能直接
+执行 VERIFY/AUTONOMOUS，从而减少绕开限时监督的风险。
+
+超时后向子进程组发送 TERM，必要时 KILL，失败结果保持失败；
+**不自动重新执行、不抢执行锁、不清理未知 Docker 容器、不部署代码**。
+管理员仍需核实进程与 Docker 容器后按 V1.9 手册人工恢复。
+
+V2.0 临时 PostgreSQL CI 新增真实的受限子进程执行只读 AUDIT
+任务，并验证审计链、没有遗留 lease、不修改原仓库。
+模拟 Agent 的代码修复仍独立使用真实 Docker 测试。
+本阶段没有部署独立持久 VM，也没有触发收费 DeepSeek API。

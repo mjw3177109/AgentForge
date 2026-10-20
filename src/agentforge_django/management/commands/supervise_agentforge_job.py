@@ -12,7 +12,8 @@ import sys
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from agentforge_django.models import AgentJob
+from agentforge_django.models import AgentJob, JobLease
+from agentforge_django.worker_readiness import worker_readiness
 
 
 class Command(BaseCommand):
@@ -21,6 +22,7 @@ class Command(BaseCommand):
     def add_arguments(self, parser):
         parser.add_argument("job_id")
         parser.add_argument("--timeout-seconds", type=int, default=900)
+        parser.add_argument("--mode", choices=("dedicated", "ci-staging"), default="dedicated")
 
     def handle(self, *args, **options):
         if (
@@ -30,6 +32,9 @@ class Command(BaseCommand):
             or not getattr(settings, "AGENTFORGE_V09_HEARTBEAT_ENABLED", False)
         ):
             raise CommandError("Dedicated Linux Worker and PostgreSQL heartbeat required")
+        # Direct invocations must honor the same gate as the systemd dispatcher.
+        if worker_readiness(mode=options["mode"]).get("ready_to_accept_candidate_only_jobs") is not True:
+            raise CommandError("WORKER_PREFLIGHT_REJECTED_NO_TASK_CLAIM")
         seconds = options["timeout_seconds"]
         if not 60 <= seconds <= 3600:
             raise CommandError("timeout-seconds must be between 60 and 3600")
@@ -50,17 +55,33 @@ class Command(BaseCommand):
         except subprocess.TimeoutExpired:
             # Best-effort process tree termination: remote Docker processes
             # may STILL be alive after CLI disappears.
-            os.killpg(child.pid, signal.SIGTERM)
+            try:
+                os.killpg(child.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 child.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                os.killpg(child.pid, signal.SIGKILL)
-                child.wait(timeout=5)
+                try:
+                    os.killpg(child.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    raise CommandError(
+                        "WORKER_TIMEOUT_PROCESS_EXIT_UNVERIFIED; manual inspection required"
+                    )
             raise CommandError(
                 "WORKER_TIMEOUT: child terminated; lease remains for manual "
                 "Docker/process inspection and explicit operator recovery"
             )
         job.refresh_from_db()
+        if (code == 0 and (
+            job.status not in (AgentJob.Status.PASS, AgentJob.Status.PROPOSED)
+            or JobLease.objects.filter(project=job.project, job=job).exists()
+        )):
+            raise CommandError("Worker exit code is not trusted proof of finalized ownership")
         if code != 0:
             raise CommandError(
                 "Worker child failed; inspect redacted job state and "

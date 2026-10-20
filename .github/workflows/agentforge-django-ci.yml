@@ -29,6 +29,7 @@ jobs:
       - name: Read-only real-model readiness inventory (NO API calls)
         run: python scripts/check_agentforge_v10_readiness.py
       - run: python examples/django_host/manage.py process_agentforge_queue --help
+      - run: python examples/django_host/manage.py process_agentforge_supervised_queue --help
       - run: python examples/django_host/manage.py recover_agentforge_job --help
       - run: pytest -q
       - run: python protocol_bundle/scripts/validate_protocol.py
