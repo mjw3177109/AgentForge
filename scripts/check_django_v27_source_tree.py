@@ -11,7 +11,7 @@ import os
 import stat
 from pathlib import Path
 
-REQUIRED_TREES = ("src", "scripts", "examples/django_host", "deploy/v07")
+REQUIRED_TREES = ("src", "scripts", "examples/django_host", "deploy")
 REQUIRED_FILES = ("pyproject.toml",)
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 MAX_ENTRIES = 50000

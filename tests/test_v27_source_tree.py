@@ -110,3 +110,13 @@ def test_stager_includes_gate_and_remains_never_start(project):
     assert text.index("check_django_v27_source_tree.py") < text.index("systemd-analyze verify")
     assert "systemctl start " not in text
     assert "systemctl enable " not in text
+
+def test_modified_staging_script_in_nested_deploy_tree_denied(project):
+    repo, _ = project
+    nested = repo / "deploy/v24"
+    nested.mkdir()
+    script = nested / "stage_units.sh"
+    script.write_text("exit 0\n", encoding="utf-8")
+    assert check(repo)["ready_for_unit_staging_only"]
+    script.chmod(0o666)
+    assert "SOURCE_ENTRY_UNTRUSTED" in check(repo)["failure_codes"]

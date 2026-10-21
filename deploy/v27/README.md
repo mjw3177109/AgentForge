@@ -8,15 +8,15 @@ example and reviewed systemd templates.
 
 ## Execute on a separately managed, trusted dedicated Linux Worker VM
 
-From the reviewed checkout at \`/opt/agentforge/AgentForge\`:
+From the reviewed checkout at `/opt/agentforge/AgentForge`:
 
-\`\`\`bash
+```bash
 python3 scripts/check_django_v23_systemd.py
 python3 scripts/check_django_v25_host.py
 python3 scripts/check_django_v27_source_tree.py
 sudo bash deploy/v24/stage_units.sh --stage-reviewed-units
 python3 scripts/audit_django_v24_systemd_host.py --output /tmp/agentforge-v24-audit.json
-\`\`\`
+```
 
 **No script here starts or enables the Worker.** Do not run the stage command
 on a public web server or generic shared runner. Inspect all failures before
@@ -25,8 +25,8 @@ requires root-owned source files/directories with no group/other write access,
 readable files, traversable directories, and no symlinks or special files inside
 the scanned code trees. It checks these roots:
 
-- \`src/\`, \`scripts/\`, \`examples/django_host/\`, \`deploy/v07/\`
-- \`pyproject.toml\`
+- `src/`, `scripts/`, `examples/django_host/`, `deploy/` (including staging scripts)
+- `pyproject.toml`
 
 The receipt contains fixed failure codes and counts, never source paths,
 source bytes, secrets or environment values. It does not read any code
