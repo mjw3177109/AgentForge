@@ -14,6 +14,7 @@ from django.db.migrations.executor import MigrationExecutor
 
 from .docker_verify import docker_image, resolve_verifier_image, list_verifier_containers
 from .guard import BoundaryDenied
+from .models import JobLease
 
 
 def worker_readiness(*, mode="dedicated"):
@@ -123,6 +124,20 @@ def worker_readiness(*, mode="dedicated"):
     else:
         record("schema_migrations_applied", False, "SKIPPED_INVALID_CONFIG_OR_DB")
 
+    # V2.3 restart interlock: a previous run's live/stale lease is NOT
+    # proof its OS process stopped. Fail closed before Docker or task claim.
+    # A dedicated single-job Worker requires the DB to be lease-free at
+    # start; any stale lease needs independent operator recovery.
+    if all(item["passed"] for item in checks):
+        try:
+            lease_free = not JobLease.objects.exists()
+        except Exception:
+            lease_free = False
+        record("no_prior_worker_leases", lease_free,
+               "ACTIVE_OR_STALE_WORKER_LEASE_REQUIRES_OPERATOR")
+    else:
+        record("no_prior_worker_leases", False,
+               "SKIPPED_INVALID_CONFIG_OR_SCHEMA")
     if all(item["passed"] for item in checks):
         if not shutil.which("docker"):
             resolved = False
@@ -147,7 +162,7 @@ def worker_readiness(*, mode="dedicated"):
                "SKIPPED_INVALID_CONFIG_OR_DOCKER")
     passed = all(item["passed"] for item in checks)
     return {
-        "schema": "agentforge.django.v19.worker-preflight.v1",
+        "schema": "agentforge.django.v23.worker-preflight.v1",
         "mode": mode,
         "ready_to_accept_candidate_only_jobs": passed,
         "checks": checks,

@@ -52,7 +52,7 @@ class WorkerStartupPreflightTests(SimpleTestCase):
         }
 
     def happy(self, *, db_success=True, migrations_pending=False,
-              pin=IMAGE_ID, settings_obj=None, orphans=None):
+              pin=IMAGE_ID, settings_obj=None, orphans=None, prior_lease=False):
         settings_obj = settings_obj or test_settings(self.root)
         connection = MagicMock()
         connection.vendor = "postgresql"
@@ -81,6 +81,9 @@ class WorkerStartupPreflightTests(SimpleTestCase):
                  return_value=pin) as image, patch(
             "agentforge_django.worker_readiness.list_verifier_containers",
             return_value=[] if orphans is None else orphans,
+        ), patch(
+            "agentforge_django.worker_readiness.JobLease.objects.exists",
+            return_value=prior_lease,
         ):
             result = worker_readiness(mode="ci-staging")
         return result, connection, executor, image
@@ -89,7 +92,7 @@ class WorkerStartupPreflightTests(SimpleTestCase):
         result, connection, executor, image = self.happy()
         self.assertTrue(result["ready_to_accept_candidate_only_jobs"])
         self.assertEqual(result["checks_passed"], result["checks_total"])
-        self.assertEqual(result["checks_total"], 12)
+        self.assertEqual(result["checks_total"], 13)
         self.assertFalse(result["external_vm_independently_attested"])
         self.assertFalse(result["real_deepseek_tested"])
         self.assertFalse(result["production_release_authorized"])
@@ -150,6 +153,18 @@ class WorkerStartupPreflightTests(SimpleTestCase):
         self.assertNotIn("model_cost", result)
         self.assertNotIn("API_KEY", json.dumps(result))
         self.assertFalse(result["external_vm_independently_attested"])
+
+    def test_restart_with_existing_lease_denies_before_docker(self):
+        result, connection, executor, image = self.happy(prior_lease=True)
+        self.assertFalse(result["ready_to_accept_candidate_only_jobs"])
+        gates = {x["check"]: x for x in result["checks"]}
+        self.assertEqual(gates["no_prior_worker_leases"]["failure_code"],
+                         "ACTIVE_OR_STALE_WORKER_LEASE_REQUIRES_OPERATOR")
+        self.assertEqual(gates["docker_verifier_identity"]["failure_code"],
+                         "SKIPPED_INVALID_CONFIG_OR_SCHEMA")
+        image.assert_not_called()
+        connection.cursor.assert_called_once()
+        executor.migration_plan.assert_called_once()
 
     def test_orphan_verifier_container_refuses_new_worker_jobs(self):
         orphans = [{"container_id": "a" * 64,

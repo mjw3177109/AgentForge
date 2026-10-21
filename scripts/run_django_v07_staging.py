@@ -219,6 +219,76 @@ def main():
                 pass
         if not all(supervised_evidence.values()):
             raise RuntimeError("V2.0 supervised child integration failed")
+
+        # V2.3 restart incident: create a synthetic abandoned lease on an
+        # already-finished task, in the real shared PostgreSQL database.
+        # A NEW Worker OS process must reject startup BEFORE touching Docker
+        # or claiming another job. Then explicitly run the existing
+        # operator-approved recovery code on this known stopped CI fixture.
+        from agentforge_django.models import JobLease
+        from agentforge_django.recovery import recover_stopped_worker
+        orphan_lease = JobLease.objects.create(
+            project=project, job=supervised_audit,
+        )
+        restarted = subprocess.run(
+            [sys.executable, str(HOST / "manage.py"),
+             "check_agentforge_worker", "--mode", "ci-staging", "--json"],
+            cwd=ROOT, env=worker, capture_output=True, text=True, timeout=35,
+        )
+        restart_report = {}
+        try:
+            restart_report = json.loads(
+                restarted.stdout.strip().splitlines()[-1]
+            )
+        except (ValueError, IndexError, AttributeError):
+            pass
+        restarted_gates = {
+            check.get("check"): check
+            for check in restart_report.get("checks", [])
+        }
+        restart_refused = (
+            restarted.returncode != 0
+            and restart_report.get("ready_to_accept_candidate_only_jobs") is False
+            and restarted_gates.get("no_prior_worker_leases", {}).get("failure_code")
+                == "ACTIVE_OR_STALE_WORKER_LEASE_REQUIRES_OPERATOR"
+        )
+        if not restart_refused:
+            raise RuntimeError("V2.3 restart accepted an abandoned Worker lease")
+        # No lingering synthetic worker/child or labelled Docker container
+        # remains here; the CI fixture's one-shot process already finished.
+        recovered_job = recover_stopped_worker(
+            supervised_audit.pk, operator_confirmed=True
+        )
+        recovered_job.refresh_from_db()
+        recovery_ok = (
+            recovered_job.status == AgentJob.Status.PASS
+            and not JobLease.objects.filter(pk=orphan_lease.pk).exists()
+            and verify_chain(recovered_job)
+        )
+        if not recovery_ok:
+            raise RuntimeError("V2.3 explicit operator recovery failed")
+        after_recovery = subprocess.run(
+            [sys.executable, str(HOST / "manage.py"),
+             "check_agentforge_worker", "--mode", "ci-staging", "--json"],
+            cwd=ROOT, env=worker, capture_output=True, text=True, timeout=35,
+        )
+        v23_restart_evidence = {
+            "real_postgres_orphan_lease_blocked_startup": restart_refused,
+            "operator_only_recovery_cleared_lease": recovery_ok,
+            "fresh_worker_preflight_exited_zero": after_recovery.returncode == 0,
+            "no_automatic_retry": True,
+            "no_deepseek_api_key_in_ci": "AGENTFORGE_LLM_API_KEY" not in worker,
+            "independent_vm_deployed": False,
+            "production_release_authorized": False,
+        }
+        if not all((
+            v23_restart_evidence["real_postgres_orphan_lease_blocked_startup"],
+            v23_restart_evidence["operator_only_recovery_cleared_lease"],
+            v23_restart_evidence["fresh_worker_preflight_exited_zero"],
+            v23_restart_evidence["no_automatic_retry"],
+            v23_restart_evidence["no_deepseek_api_key_in_ci"],
+        )):
+            raise RuntimeError("V2.3 restart recovery recheck failed")
         project_file_unchanged = (
             "return a - b" in (project_root / "app/views.py").read_text("utf-8")
             and git(project_root, "status", "--porcelain") == ""
@@ -258,6 +328,7 @@ def main():
             "audit_hash_chain_valid": verify_chain(job),
             "worker": worker_evidence,
             "v20_supervised_audit": supervised_evidence,
+            "v23_restart_interlock": v23_restart_evidence,
             "v18_preflight": preflight,
             "preflight_gate_passed": (
                 preflight.get("ready_to_accept_candidate_only_jobs") is True
@@ -282,6 +353,9 @@ def main():
             and evidence["audit_hash_chain_valid"]
             and evidence["preflight_gate_passed"]
             and all(supervised_evidence.values())
+            and v23_restart_evidence["real_postgres_orphan_lease_blocked_startup"]
+            and v23_restart_evidence["operator_only_recovery_cleared_lease"]
+            and v23_restart_evidence["fresh_worker_preflight_exited_zero"]
             and export_ok and apply_check_ok
             and evidence["heartbeat_beats_observed"]
         ):
