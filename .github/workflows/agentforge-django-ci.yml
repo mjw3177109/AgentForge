@@ -41,6 +41,8 @@ jobs:
           python -m pytest tests/test_v24_live_systemd_contract.py -q
       - name: V2.6 trusted interpreter path and symlink ownership regression
         run: python -m pytest tests/test_v25_host_prereqs.py -q
+      - name: V2.7 recursive dedicated Worker source-tree metadata gate
+        run: python -m pytest tests/test_v27_source_tree.py -q
       - run: python examples/django_host/manage.py process_agentforge_supervised_queue --help
       - run: python examples/django_host/manage.py recover_agentforge_job --help
       - run: pytest -q

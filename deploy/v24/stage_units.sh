@@ -55,6 +55,8 @@ python3 "$ROOT/scripts/check_django_v23_systemd.py"
 # Read-only checks of the REAL VM identity, immutable source/venv and
 # root-owned 0600 EnvironmentFile. Do not parse or print credentials.
 python3 "$ROOT/scripts/check_django_v25_host.py"
+# V2.7: refuse nested mutable source, symlinks, and special code files.
+python3 "$ROOT/scripts/check_django_v27_source_tree.py"
 if systemctl is-active --quiet agentforge-worker.service ||
    systemctl is-active --quiet agentforge-worker.timer ||
    systemctl is-enabled --quiet agentforge-worker.timer; then
