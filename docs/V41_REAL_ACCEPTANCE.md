@@ -20,7 +20,7 @@ The trusted JUnit test uses a fixed constructor/interface contract based on the 
 
 ## Trust boundary and artifacts
 
-- The external DeepSeek runner has access to the model key but **no attestation keys**.
+- The external DeepSeek runner has access to the model key but **no attestation keys**. The *additional* V4.1 service/MySQL subprocesses inherit only a minimal allowlisted environment containing localhost test-database credentials and JVM settings, not the model or GitHub runtime tokens.
 - An isolated verifier job checks the original V2 10-gate evidence with the P1 signature key and then verifies the new V4.1 P2 trace/Java log with a **separate V4.1 HMAC key**.
 - Attestations bind `github.run_id`, exact `github.sha`, model identifier, P1 manifest hash, and the new 6 evidence files. They cannot authorize a release.
 - Generated project files are never modified by injected JUnit tests; only a disposable copy receives the trusted file. The schema is always `agentforge_v41_<run_id>_<round>` and is created using local MySQL 8, with cleanup only if creation succeeded.
@@ -28,7 +28,7 @@ The trusted JUnit test uses a fixed constructor/interface contract based on the 
 
 ## GitHub installation
 
-Branch `feature/v4-1-acceptance` is based on the V4 commit `bb847313c654093d2586696c1d17106db88a68e4`. This patch consists solely of new paths. The existing V4 and V3 modules remain unchanged.
+Branch `feature/v4-1-acceptance` is based on the V4 commit `bb847313c654093d2586696c1d17106db88a68e4`. This patch introduces new V4.1 paths and makes **one test-only correction** in `tests/test_v3_memory.py`: reuse the identical signed envelope for the idempotent re-import test. Re-signing generates different bytes and remains rejected. No V3/V4 runtime code, authorization checks, or production configuration is changed.
 
 For offline tests:
 
@@ -49,3 +49,7 @@ The independent output statuses `V41_SYNTHETIC_CANDIDATE` and `V41_SYNTHETIC_IND
 ## Acceptance decision
 
 **PASS candidate** only when all 3 distinct DeepSeek rounds have four actual P2 Agent execution traces, Reviewer APPROVE, exactly 10/10 original independent gates plus the new Java service behavior gate, and an independently verified P1+V4.1 attestation bound to the same run/commit/model. Partial results stay FAIL. PRs remain Draft pending explicit human approval.
+
+## Discovered three-cycle regression (2026-10-21)
+
+The first V4.1 Python 3.11 three-cycle CI run failed on its **second** repetition because an older test regenerated a timestamp-bearing HMAC envelope for an already recorded Run ID. The existing memory replay defense properly rejected it. We changed only the test to reuse the original envelope and expanded the offline workflow paths filter to include this security regression test. The security check was not modified and no CI pass is claimed until the new exact SHA completes.

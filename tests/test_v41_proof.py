@@ -109,12 +109,17 @@ def test_service_gate_runs_trusted_junit_only_in_copy(tmp_path, monkeypatch):
     calls = []
     def fake_run(argv, *, cwd, env, timeout, stdin=None):
         calls.append((argv, str(cwd), stdin))
+        assert "AGENTFORGE_LLM_API_KEY" not in env
+        assert "AGENTFORGE_V41_ATTEST_KEY" not in env
+        assert "AGENTFORGE_V20_MYSQL_PASSWORD" in env
         if argv[0] == 'mvn':
             assert (Path(cwd) / "server/src/test/java/com/agentforge/shop/points/TrustedPointsExactlyOnceTest.java").is_file()
             assert "-Dtest=TrustedPointsExactlyOnceTest" in argv
         return {"returncode": 0, "stdout": "", "stderr": ""}
     monkeypatch.setenv("GITHUB_ACTIONS", "true")
     monkeypatch.setenv("AGENTFORGE_V20_MYSQL_PASSWORD", "isolated-test-password")
+    monkeypatch.setenv("AGENTFORGE_LLM_API_KEY", "THIS_MUST_NOT_REACH_UNTRUSTED_MAVEN")
+    monkeypatch.setenv("AGENTFORGE_V41_ATTEST_KEY", "THIS_MUST_NOT_REACH_UNTRUSTED_MAVEN")
     monkeypatch.setattr(gate, "_run", fake_run)
     report = tmp_path / "report"
     result = gate.check_java_service(root, report, round_index=1, run_id="101",

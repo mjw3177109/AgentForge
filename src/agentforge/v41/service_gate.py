@@ -71,7 +71,13 @@ def check_java_service(snapshot: Path, folder: Path, *, round_index: int,
             raise ValueError("ISOLATED_MYSQL_PASSWORD_MISSING")
     except (OSError, ValueError) as e:
         return {**blocked, "reason": str(e)[:600]}
-    env = os.environ.copy()
+    # Generated Maven code and SQL clients must never inherit the DeepSeek key,
+    # GitHub runtime tokens, attestation keys, or unrelated runner secrets.
+    # Only explicitly required JVM/client settings and isolated DB credentials.
+    permitted = ("PATH", "HOME", "JAVA_HOME", "M2_HOME", "MAVEN_OPTS",
+                 "MAVEN_CONFIG", "LANG", "LC_ALL", "TMPDIR", "TZ")
+    env = {name: os.environ[name] for name in permitted if name in os.environ}
+    env["AGENTFORGE_V20_MYSQL_PASSWORD"] = password
     env["MYSQL_PWD"] = password
     env["AGENTFORGE_V41_JDBC_URL"] = (
         f"jdbc:mysql://127.0.0.1:3306/{schema}?useSSL=false&serverTimezone=UTC"

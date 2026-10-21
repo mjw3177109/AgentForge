@@ -110,13 +110,14 @@ class TrustedPointsExactlyOnceTest {
         assertTimeoutPreemptively(Duration.ofSeconds(35), () -> {
             ExecutorService executor = Executors.newFixedThreadPool(2);
             CountDownLatch go = new CountDownLatch(1);
-            Callable<Object> job = () -> {
+            Callable<Boolean> job = () -> {
                 go.await();
-                return service.earnAfterPayment("V41-CONCURRENT-0001", new BigDecimal("100.50"));
+                service.earnAfterPayment("V41-CONCURRENT-0001", new BigDecimal("100.50"));
+                return true;
             };
             try {
-                Future<Object> first = executor.submit(job);
-                Future<Object> second = executor.submit(job);
+                Future<Boolean> first = executor.submit(job);
+                Future<Boolean> second = executor.submit(job);
                 go.countDown();
                 first.get();
                 second.get();
