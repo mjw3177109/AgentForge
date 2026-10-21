@@ -43,6 +43,8 @@ jobs:
         run: python -m pytest tests/test_v25_host_prereqs.py -q
       - name: V2.7 recursive dedicated Worker source-tree metadata gate
         run: python -m pytest tests/test_v27_source_tree.py -q
+      - name: V2.8 fail-closed live host receipt verifier (mocked offline; no VM)
+        run: python -m pytest tests/test_v28_host_acceptance.py -q
       - run: python examples/django_host/manage.py process_agentforge_supervised_queue --help
       - run: python examples/django_host/manage.py recover_agentforge_job --help
       - run: pytest -q
