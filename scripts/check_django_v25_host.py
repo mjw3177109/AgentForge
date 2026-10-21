@@ -76,9 +76,13 @@ def check_host(*, repo, python, secrets, expected_root_uid=0,
     # parent directory replace the interpreter between staging and execution.
     try:
         link_metadata = python.lstat()
+        # POSIX symlink mode is normally 0777 and not used for access
+        # checks. Require trusted ownership; parent directory permissions
+        # prevent an untrusted user from replacing the link itself.
         link_owner_ok = (
             link_metadata.st_uid == expected_root_uid
-            and not (link_metadata.st_mode & 0o022)
+            and (stat.S_ISLNK(link_metadata.st_mode)
+                 or not (link_metadata.st_mode & 0o022))
         )
         venv_tree_ok = (
             _kind(python.parent.parent, directory=True, root_uid=expected_root_uid)
