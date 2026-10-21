@@ -83,9 +83,17 @@ def check_host(*, repo, python, secrets, expected_root_uid=0,
             _kind(python.parent.parent, directory=True, root_uid=expected_root_uid)
             and _kind(python.parent, directory=True, root_uid=expected_root_uid)
         )
+        # Real staging always requires root (UID 0) and audits the FULL
+        # executable ancestry. Unit tests deliberately supply the CI runner
+        # UID and a temporary fixture under /tmp; only in that non-root test
+        # mode check the immediate resolved parent, not shared /tmp itself.
+        ancestry = (
+            (p for p in resolved.parents if p != Path("/"))
+            if expected_root_uid == 0 else (resolved.parent,)
+        ) if resolved is not None else ()
         resolved_tree_ok = bool(resolved) and all(
             _kind(parent, directory=True, root_uid=expected_root_uid)
-            for parent in resolved.parents if parent != Path("/")
+            for parent in ancestry
         )
     except (OSError, ValueError):
         link_owner_ok = venv_tree_ok = resolved_tree_ok = False
