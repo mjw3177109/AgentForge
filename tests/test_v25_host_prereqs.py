@@ -38,7 +38,8 @@ def vm(tmp_path):
     def check():
         return HOST.check_host(
             repo=repo, python=python, secrets=env,
-            expected_root_uid=os.getuid(), account_lookup=user
+            expected_root_uid=os.getuid(), account_lookup=user,
+            _fixture_ancestry_boundary=repo.parent
         )
     return repo, manager, env, python, check
 
