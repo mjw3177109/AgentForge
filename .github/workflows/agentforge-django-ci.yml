@@ -35,6 +35,10 @@ jobs:
       - run: python examples/django_host/manage.py process_agentforge_queue --help
       - name: V2.3 verify tracked systemd service + timer deployment contract
         run: python scripts/check_django_v23_systemd.py
+      - name: V2.4 staged-only systemd installer syntax + on-host audit regressions
+        run: |
+          bash -n deploy/v24/stage_units.sh
+          python -m pytest tests/test_v24_live_systemd_contract.py -q
       - run: python examples/django_host/manage.py process_agentforge_supervised_queue --help
       - run: python examples/django_host/manage.py recover_agentforge_job --help
       - run: pytest -q
