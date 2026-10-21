@@ -1,0 +1,183 @@
+name: AgentForge V4.1 Real P2 and Java Service Acceptance (Manual Paid)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type RUN_V41_THREE_PAID_DEEPSEEK_ROUNDS to incur the three paid model rounds'
+        required: true
+        type: string
+      trusted_verifier_sha:
+        description: '40-character independently reviewed commit containing V4.1 attestation code'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v41-acceptance-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce paid approval, experimental branch and pinned trusted verifier
+        shell: bash
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+          TRUSTED_SHA: ${{ inputs.trusted_verifier_sha }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = 'RUN_V41_THREE_PAID_DEEPSEEK_ROUNDS'
+          [[ "$GITHUB_REF_NAME" == feature/v4-* ]]
+          [[ "$TRUSTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+
+  offline:
+    needs: authorize
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.11','3.12']
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false, fetch-depth: 0}
+      - uses: actions/setup-python@v5
+        with: {python-version: '${{ matrix.python-version }}', cache: pip}
+      - run: python -m pip install -e '.[dev]'
+      - run: |
+          set -euo pipefail
+          python scripts/v41_scope_audit.py
+          for i in 1 2 3; do
+            python -m pytest -q
+            python protocol_bundle/scripts/validate_protocol.py
+          done
+        shell: bash
+
+  live:
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      mysql:
+        image: mysql:8.0
+        env: {MYSQL_ROOT_PASSWORD: root, MYSQL_DATABASE: agentforge}
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd='mysqladmin ping -h localhost -proot'
+          --health-interval=5s --health-timeout=5s --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd='redis-cli ping'
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    env:
+      AGENTFORGE_LLM_BASE_URL: ${{ vars.AGENTFORGE_LLM_BASE_URL }}
+      AGENTFORGE_LLM_MODEL: ${{ vars.AGENTFORGE_LLM_MODEL }}
+      AGENTFORGE_LLM_API_KEY: ${{ secrets.AGENTFORGE_LLM_API_KEY }}
+      AGENTFORGE_LLM_TIMEOUT: '90'
+      AGENTFORGE_LLM_MAX_ATTEMPTS: '3'
+      AGENTFORGE_V20_MYSQL_PASSWORD: root
+      MYSQL_PWD: root
+    steps:
+      - uses: actions/checkout@v4
+        with: {persist-credentials: false}
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12', cache: pip}
+      - uses: actions/setup-java@v5
+        with: {distribution: temurin, java-version: '17'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '20'}
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y default-mysql-client redis-tools
+      - run: python -m pip install -e '.[dev]'
+      - name: Check ephemeral MySQL and Redis
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$AGENTFORGE_LLM_BASE_URL"
+          test -n "$AGENTFORGE_LLM_MODEL"
+          test -n "$AGENTFORGE_LLM_API_KEY"
+          mysql --protocol=TCP -h127.0.0.1 -P3306 -uroot agentforge -e 'SELECT 1;'
+          redis-cli -h 127.0.0.1 -p 6379 PING
+      - name: Three REAL DeepSeek rounds, P2 execution proof, and 11 independent gates
+        run: >-
+          python scripts/v41_live_acceptance.py
+          --rounds 3 --round-timeout 1200 --output-dir artifacts/v41-live
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v41-real-deepseek-evidence
+          path: artifacts/v41-live/
+          if-no-files-found: error
+          retention-days: 7
+
+  independent-attestation:
+    needs: live
+    if: ${{ needs.live.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      AGENTFORGE_V3_EVIDENCE_KEY: ${{ secrets.AGENTFORGE_V3_EVIDENCE_KEY }}
+      AGENTFORGE_V41_ATTEST_KEY: ${{ secrets.AGENTFORGE_V41_ATTEST_KEY }}
+      PINNED_MODEL: ${{ vars.AGENTFORGE_LLM_MODEL }}
+      PINNED_COMMIT: ${{ github.sha }}
+      PINNED_RUN_ID: ${{ github.run_id }}
+    steps:
+      - name: Checkout independently reviewed verifier (not Agent-generated code)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.trusted_verifier_sha }}
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with: {python-version: '3.12'}
+      - run: python -m pip install -e '.[dev]'
+      - uses: actions/download-artifact@v4
+        with:
+          name: v41-real-deepseek-evidence
+          path: artifacts/v41-live
+      - name: Separate trustworthy signer requires both secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${#AGENTFORGE_V3_EVIDENCE_KEY}" -ge 32
+          test "${#AGENTFORGE_V41_ATTEST_KEY}" -ge 32
+          test -n "$PINNED_MODEL"
+      - name: Collect independently signed existing ten immutable gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/v3_evidence.py collect \
+            --artifacts artifacts/v41-live \
+            --profile benchmarks/v18_hardened/execution-profiles.yaml \
+            --run-id "$PINNED_RUN_ID" --commit "$PINNED_COMMIT" \
+            --model-id "$PINNED_MODEL" --key-id v41-p1-trusted \
+            --output artifacts/v41-p1-manifest.json
+      - name: Bind and sign P2 execution trace + Java exactly-once behavior
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/v41_attest.py collect \
+            --artifacts artifacts/v41-live --profile benchmarks/v18_hardened/execution-profiles.yaml \
+            --p1-manifest artifacts/v41-p1-manifest.json \
+            --run-id "$PINNED_RUN_ID" --commit "$PINNED_COMMIT" --model "$PINNED_MODEL" \
+            --output artifacts/v41-attestation.json
+          python scripts/v41_attest.py verify \
+            --artifacts artifacts/v41-live --profile benchmarks/v18_hardened/execution-profiles.yaml \
+            --p1-manifest artifacts/v41-p1-manifest.json \
+            --run-id "$PINNED_RUN_ID" --commit "$PINNED_COMMIT" --model "$PINNED_MODEL" \
+            --manifest artifacts/v41-attestation.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: v41-independent-signed-evidence
+          path: |
+            artifacts/v41-p1-manifest.json
+            artifacts/v41-attestation.json
+          if-no-files-found: warn
+          retention-days: 7
