@@ -189,7 +189,10 @@ def test_independent_three_round_success_associates_not_proves_strategy(memory, 
     root, profile = fixture(tmp_path)
     observe(memory, profile)
     predeclare(memory, profile)
-    result = import_run(memory, root, profile)
+    # Re-import the identical signed envelope. Re-signing later changes signed
+    # evidence bytes and must still be blocked by the replay-security check.
+    original_envelope = signed(root, profile)
+    result = import_run(memory, root, profile, envelope=original_envelope)
     assert result["status"] == "IMPORTED_PASS"
     assert result["rounds_passed"] == 3
     assert result["strategy_trial_linked"]
@@ -199,7 +202,7 @@ def test_independent_three_round_success_associates_not_proves_strategy(memory, 
     assert item["associated_failures"] == 0
     assert item["evidence_level"] == "HISTORICAL_ASSOCIATION"
     assert rec["status"] == "ADVISORY_ONLY"
-    assert import_run(memory, root, profile)["recorded"] is False
+    assert import_run(memory, root, profile, envelope=original_envelope)["recorded"] is False
     assert sum(x["associated_passes"] for x in recommendation(memory, profile)["recommendations"]) == 1
 
 
