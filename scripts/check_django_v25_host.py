@@ -70,9 +70,28 @@ def check_host(*, repo, python, secrets, expected_root_uid=0,
     except (OSError, RuntimeError):
         resolved = None
         link_safe = False
+    # Guard both the symlink itself and EVERY directory traversed on the
+    # resolved executable path. Checking only the final file lets a mutable
+    # parent directory replace the interpreter between staging and execution.
+    try:
+        link_metadata = python.lstat()
+        link_owner_ok = (
+            link_metadata.st_uid == expected_root_uid
+            and not (link_metadata.st_mode & 0o022)
+        )
+        venv_tree_ok = (
+            _kind(python.parent.parent, directory=True, root_uid=expected_root_uid)
+            and _kind(python.parent, directory=True, root_uid=expected_root_uid)
+        )
+        resolved_tree_ok = bool(resolved) and all(
+            _kind(parent, directory=True, root_uid=expected_root_uid)
+            for parent in resolved.parents if parent != Path("/")
+        )
+    except (OSError, ValueError):
+        link_owner_ok = venv_tree_ok = resolved_tree_ok = False
     py_ok = (
-        link_safe and resolved is not None
-        and _kind(python.parent, directory=True, root_uid=expected_root_uid)
+        link_safe and resolved is not None and link_owner_ok
+        and venv_tree_ok and resolved_tree_ok
         and _kind(resolved, directory=False, root_uid=expected_root_uid,
                   executable=True)
     )

@@ -123,3 +123,27 @@ def test_deployment_stager_is_opt_in_and_rolls_back_exact_created_files():
     assert "check_django_v25_host.py" in content
     assert "systemctl enable " not in content
     assert "systemctl start " not in content
+
+
+def test_untrusted_venv_directory_is_denied(vm):
+    _, _, _, python, check = vm
+    python.parent.parent.chmod(0o777)
+    assert codes(check())["trusted_venv_python"] == (
+        "VENV_PYTHON_OWNER_OR_PERMISSIONS_UNTRUSTED"
+    )
+
+
+def test_interpreter_symlink_through_mutable_parent_is_denied(vm):
+    _, _, _, python, check = vm
+    target_dir = python.parent.parent.parent / "other_interpreter"
+    target_dir.mkdir()
+    target = target_dir / "python"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    target.chmod(0o755)
+    python.unlink()
+    python.symlink_to(target)
+    assert check()["ready_for_unit_staging_only"] is True
+    target_dir.chmod(0o777)
+    assert codes(check())["trusted_venv_python"] == (
+        "VENV_PYTHON_OWNER_OR_PERMISSIONS_UNTRUSTED"
+    )
